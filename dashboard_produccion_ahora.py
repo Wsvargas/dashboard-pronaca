@@ -4,16 +4,28 @@ import pandas as pd
 import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # ============================================================
-# CONFIG STREAMLIT
+# STREAMLIT CONFIG
 # ============================================================
 st.set_page_config(
-    page_title="Producción AHORA – Línea Productiva",
+    page_title="PRONACA | Producción Avícola — AHORA",
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# ============================================================
+# PRONACA STYLE (colors)
+# ============================================================
+PRONACA_RED = "#DA291C"
+PRONACA_BLACK = "#0B0B0C"
+BG = "#F3F4F6"
+CARD = "#FFFFFF"
+BORDER = "#E5E7EB"
+MUTED = "#6B7280"
+
+PRONACA_COLORWAY = [PRONACA_RED, PRONACA_BLACK, "#6B7280", "#F59E0B", "#16A34A"]
 
 # ============================================================
 # CURVA BIOLOGICA (kg/ave)
@@ -71,6 +83,77 @@ CURVA = {
 }
 
 # ============================================================
+# CSS (corporate)
+# ============================================================
+st.markdown(f"""
+<style>
+  .stApp {{
+    background: {BG};
+  }}
+  .block-container {{
+    padding-top: 1.2rem;
+    padding-bottom: 2.0rem;
+  }}
+  section[data-testid="stSidebar"] {{
+    background: {CARD};
+    border-right: 1px solid {BORDER};
+  }}
+  h1, h2, h3 {{
+    letter-spacing: -0.02em;
+    color: {PRONACA_BLACK};
+  }}
+  .muted {{
+    color: {MUTED};
+    font-size: 0.95rem;
+  }}
+  .topbar {{
+    background: {CARD};
+    border: 1px solid {BORDER};
+    border-radius: 16px;
+    padding: 14px 16px;
+    box-shadow: 0 1px 10px rgba(0,0,0,0.04);
+    margin-bottom: 14px;
+  }}
+  .kpi-card {{
+    background: {CARD};
+    border: 1px solid {BORDER};
+    border-radius: 14px;
+    padding: 14px 14px 12px 14px;
+    box-shadow: 0 1px 8px rgba(0,0,0,0.04);
+  }}
+  .kpi-accent {{
+    border-left: 6px solid {PRONACA_RED};
+  }}
+  .kpi-label {{
+    color: {MUTED};
+    font-size: 0.85rem;
+    margin-bottom: 6px;
+  }}
+  .kpi-value {{
+    font-size: 1.55rem;
+    font-weight: 800;
+    line-height: 1.1;
+    color: {PRONACA_BLACK};
+  }}
+  .pill {{
+    display: inline-block;
+    padding: 6px 10px;
+    border: 1px solid {BORDER};
+    border-radius: 999px;
+    background: {CARD};
+    color: {MUTED};
+    font-size: 0.85rem;
+  }}
+  div[data-testid="stDataFrame"] {{
+    background: {CARD};
+    border: 1px solid {BORDER};
+    border-radius: 14px;
+    overflow: hidden;
+  }}
+</style>
+""", unsafe_allow_html=True)
+
+# ============================================================
 # HELPERS
 # ============================================================
 def to_dt(s):
@@ -79,59 +162,25 @@ def to_dt(s):
 def to_num(s):
     return pd.to_numeric(s, errors="coerce")
 
-@st.cache_data(show_spinner=False)
-def load_excel(file_path_or_bytes):
+def fmt_int(x):
     try:
-        df = pd.read_excel(file_path_or_bytes, sheet_name="final", engine="openpyxl")
-    except Exception:
-        df = pd.read_excel(file_path_or_bytes, engine="openpyxl")
-    
-    # Fechas
-    for c in ["FechaTransaccion", "Cierre de campaña", "Fecha recepción"]:
-        if c in df.columns:
-            df[c] = to_dt(df[c])
-    
-    # Números
-    num_cols = [
-        "Edad","Peso","PesoFinal","Mortalidad","Descarte","MortalidadTotalDia","MortalidadAcumulada",
-        "Aves Planta","Aves Neto","AvesVivas","EdadVenta","Kilos Neto","AvesVivasVenta","PesoSalidaKg",
-        "UltimoReal7","Galpon"
-    ]
-    for c in num_cols:
-        if c in df.columns:
-            df[c] = to_num(df[c])
-    
-    # Strings
-    if "Sexo" in df.columns:
-        df["Sexo"] = df["Sexo"].astype(str).str.upper().replace({"NAN": np.nan, "NONE": np.nan})
-    if "EstadoLote" in df.columns:
-        df["EstadoLote"] = df["EstadoLote"].astype(str).str.upper()
-    
-    # Zona (de LoteCompleto: BUC = Bucaya, STD = Santo Domingo)
-    if "LoteCompleto" in df.columns:
-        df["Zona"] = df["LoteCompleto"].astype(str).str.extract(r"^(BUC|STO)", expand=False)
-    
-    return df
+        return f"{int(x):,}"
+    except:
+        return "—"
 
-def extract_zona(lote_str):
-    """Extrae zona (BUC, STD, etc.) del código de lote"""
-    if pd.isna(lote_str):
-        return "OTRO"
-    lote = str(lote_str).upper()
-    if lote.startswith("BUC"):
-        return "BUCAYA"
-    elif lote.startswith("STD"):
-        return "SANTO DOMINGO"
-    else:
-        return "OTRO"
+def fmt_float(x, nd=2, suf=""):
+    try:
+        if pd.isna(x):
+            return "—"
+        return f"{float(x):.{nd}f}{suf}"
+    except:
+        return "—"
 
 def get_etapa(edad):
-    """Clasifica edad en etapas productivas"""
     try:
         e = float(edad)
     except:
-        return "DESCONOCIDO"
-    
+        return "Desconocido"
     if e <= 14:
         return "Inicio (1-14)"
     elif e <= 28:
@@ -143,426 +192,482 @@ def get_etapa(edad):
     else:
         return "Final (43+)"
 
+def zona_nombre(z):
+    z = str(z).upper()
+    if z == "BUC":
+        return "Bucayá"
+    if z == "STO":
+        return "Santo Domingo"
+    return "Otro"
+
+def apply_pronaca_plotly(fig, height=380):
+    fig.update_layout(
+        template="plotly_white",
+        height=height,
+        colorway=PRONACA_COLORWAY,
+        font=dict(family="Arial", size=13, color=PRONACA_BLACK),
+        title=dict(font=dict(size=16, color=PRONACA_BLACK)),
+        margin=dict(l=10, r=10, t=55, b=10),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    )
+    fig.update_xaxes(showgrid=True, gridcolor=BORDER, zeroline=False)
+    fig.update_yaxes(showgrid=True, gridcolor=BORDER, zeroline=False)
+    return fig
+
+def kpi_card(label, value, sub=None, accent=True):
+    cls = "kpi-card kpi-accent" if accent else "kpi-card"
+    sub_html = f"<div class='muted'>{sub}</div>" if sub else ""
+    st.markdown(f"""
+    <div class="{cls}">
+      <div class="kpi-label">{label}</div>
+      <div class="kpi-value">{value}</div>
+      {sub_html}
+    </div>
+    """, unsafe_allow_html=True)
+
+def curva_series(sexo: str, edades: list[int]):
+    sexo = (sexo or "S").upper()
+    out = []
+    for e in edades:
+        if e in CURVA:
+            out.append(CURVA[e].get(sexo, CURVA[e].get("S", np.nan)))
+        else:
+            out.append(np.nan)
+    return out
+
+@st.cache_data(show_spinner=False)
+def load_excel(file_path_or_bytes):
+    try:
+        df = pd.read_excel(file_path_or_bytes, sheet_name="final", engine="openpyxl")
+    except Exception:
+        df = pd.read_excel(file_path_or_bytes, engine="openpyxl")
+
+    # Fechas
+    for c in ["FechaTransaccion", "Cierre de campaña", "Fecha recepción"]:
+        if c in df.columns:
+            df[c] = to_dt(df[c])
+
+    # Números
+    num_cols = [
+        "Edad","Peso","PesoFinal","Mortalidad","Descarte","MortalidadTotalDia","MortalidadAcumulada",
+        "Aves Planta","Aves Neto","AvesVivas","EdadVenta","Kilos Neto","AvesVivasVenta","PesoSalidaKg",
+        "UltimoReal7","Galpon"
+    ]
+    for c in num_cols:
+        if c in df.columns:
+            df[c] = to_num(df[c])
+
+    # Strings
+    if "Sexo" in df.columns:
+        df["Sexo"] = df["Sexo"].astype(str).str.upper().replace({"NAN": np.nan, "NONE": np.nan})
+    if "EstadoLote" in df.columns:
+        df["EstadoLote"] = df["EstadoLote"].astype(str).str.upper()
+
+    # Zona (BUC / STO)
+    if "LoteCompleto" in df.columns:
+        df["Zona"] = df["LoteCompleto"].astype(str).str.extract(r"^(BUC|STO)", expand=False)
+
+    return df
+
 def build_snapshot(df, corte_dt=None):
-    """
-    Snapshot AHORA: última fila por lote (por edad más reciente)
-    """
     if df.empty:
         return pd.DataFrame()
-    
+
     d = df.copy()
-    
-    if corte_dt and "FechaTransaccion" in d.columns:
+    if corte_dt is not None and "FechaTransaccion" in d.columns:
         d = d[d["FechaTransaccion"].notna() & (d["FechaTransaccion"] <= corte_dt)]
-    
-    # Última por lote
+
+    # Última fila por lote
     if "FechaTransaccion" in d.columns:
         d = d.sort_values(["LoteCompleto", "FechaTransaccion", "Edad"])
     else:
         d = d.sort_values(["LoteCompleto", "Edad"])
-    
+
     last = d.groupby("LoteCompleto").tail(1).copy()
-    
-    # Alias
-    last["EdadActual"] = last["Edad"]
+
+    last["EdadActual"] = last.get("Edad", np.nan)
     last["PesoActual"] = last.get("PesoFinal", last.get("Peso", np.nan))
-    
-    # Mortalidad %
+    last["Etapa"] = last["EdadActual"].apply(get_etapa)
+
     if "Aves Neto" in last.columns and "MortalidadAcumulada" in last.columns:
         last["MortalidadPct"] = np.where(
             last["Aves Neto"].fillna(0) > 0,
             (last["MortalidadAcumulada"].fillna(0) / last["Aves Neto"].fillna(0)) * 100,
             np.nan
         )
-    
-    # Etapa
-    last["Etapa"] = last["EdadActual"].apply(get_etapa)
-    
+
+    # Zona legible
+    if "Zona" in last.columns:
+        last["ZonaNombre"] = last["Zona"].apply(zona_nombre)
+
     return last
 
 # ============================================================
 # LOAD DATA
 # ============================================================
 default_path = "produccion_actual_final.xlsx"
-
 if not os.path.exists(default_path):
-    st.error("❌ No se encontró 'produccion_actual_final.xlsx' en la carpeta actual.")
+    st.error("No se encontró el archivo 'produccion_actual_final.xlsx' en la carpeta actual.")
     st.stop()
 
 df = load_excel(default_path)
-
 if df.empty:
-    st.error("Dataset vacío. Revisa el archivo.")
+    st.error("El dataset está vacío. Revisar el archivo de entrada.")
     st.stop()
 
-# Corte
 corte = df["FechaTransaccion"].max() if "FechaTransaccion" in df.columns else datetime.now()
 snap = build_snapshot(df, corte_dt=corte)
 
-with st.sidebar:
-    st.header("📊 Datos")
-    st.success(f"✅ Cargado: produccion_actual_final.xlsx")
-    st.caption(f"Corte: {corte.date() if pd.notna(corte) else 'N/A'}")
+# ============================================================
+# SIDEBAR (filters)
+# ============================================================
+def reset_filters():
+    keys = ["zonas", "estados", "sexos", "mort_alert", "lote_search", "lote_detail", "tipo_lote"]
+    for k in keys:
+        if k in st.session_state:
+            del st.session_state[k]
 
-# ============================================================
-# SIDEBAR FILTROS
-# ============================================================
 with st.sidebar:
+    st.markdown("### Datos")
+    st.write("Archivo:", default_path)
+    st.write("Corte:", corte.date() if pd.notna(corte) else "N/A")
     st.divider()
-    st.header("🎯 Filtros")
-    
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.button("Reset filtros", use_container_width=True, on_click=reset_filters)
+    with c2:
+        st.download_button(
+            "Descargar snapshot",
+            data=snap.to_csv(index=False).encode("utf-8"),
+            file_name="snapshot_pronaca.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+
+    st.divider()
+    st.markdown("### Filtros")
+
     # Zona
-    zonas_avail = snap["Zona"].dropna().unique() if "Zona" in snap.columns else []
-    zonas_default = sorted(zonas_avail) if len(zonas_avail) > 0 else []
-    sel_zonas = st.multiselect("Zona", zonas_default, default=zonas_default, key="zonas")
-    
+    zonas_avail = sorted(snap["ZonaNombre"].dropna().unique()) if "ZonaNombre" in snap.columns else []
+    sel_zonas = st.multiselect("Zona", options=zonas_avail, default=zonas_avail, key="zonas")
+
     # Estado
-    estados_avail = ["ABIERTO", "CERRADO"]
-    if "EstadoLote" in snap.columns:
-        estados_avail = sorted(snap["EstadoLote"].dropna().unique())
-    sel_estados = st.multiselect("Estado lote", estados_avail, default=["ABIERTO", "CERRADO"], key="estados")
-    
+    estados_avail = sorted(snap["EstadoLote"].dropna().unique()) if "EstadoLote" in snap.columns else ["ABIERTO", "CERRADO"]
+    sel_estados = st.multiselect("Estado lote", options=estados_avail, default=estados_avail, key="estados")
+
     # Sexo
-    sexos_avail = snap["Sexo"].dropna().unique() if "Sexo" in snap.columns else []
-    sel_sexos = st.multiselect("Sexo", sorted(sexos_avail), default=sorted(sexos_avail), key="sexos")
-    
-    st.divider()
-    st.header("⚙️ Umbrales")
-    
-    mort_alert = st.slider("Alerta mortalidad (%)", 0, 20, 7, 1)
-    st.divider()
+    sexos_avail = sorted(snap["Sexo"].dropna().unique()) if "Sexo" in snap.columns else []
+    sel_sexos = st.multiselect("Sexo", options=sexos_avail, default=sexos_avail, key="sexos")
 
-# Aplicar filtros
+    st.divider()
+    st.markdown("### Umbral")
+    mort_alert = st.slider("Alerta mortalidad (%)", 0, 20, 7, 1, key="mort_alert")
+
+# Apply filters
 snap_f = snap.copy()
-
-if sel_zonas and "Zona" in snap_f.columns:
-    snap_f = snap_f[snap_f["Zona"].isin(sel_zonas)]
-
+if sel_zonas and "ZonaNombre" in snap_f.columns:
+    snap_f = snap_f[snap_f["ZonaNombre"].isin(sel_zonas)]
 if sel_estados and "EstadoLote" in snap_f.columns:
     snap_f = snap_f[snap_f["EstadoLote"].isin(sel_estados)]
-
 if sel_sexos and "Sexo" in snap_f.columns:
     snap_f = snap_f[snap_f["Sexo"].isin(sel_sexos)]
 
 # ============================================================
-# MAIN LAYOUT
+# TOP HEADER
 # ============================================================
+logo_path = "assets/pronaca.png"
 
-# Header
-st.markdown("""
-<style>
-    h1 { font-size: 2.8em; margin-bottom: 0.2em; }
-</style>
-""", unsafe_allow_html=True)
-
-st.title("📈 Producción AHORA")
-st.caption(f"Estado actual de la línea productiva | Corte: {corte.date() if pd.notna(corte) else 'N/A'}")
+with st.container():
+    c1, c2, c3 = st.columns([0.18, 0.62, 0.20], vertical_alignment="center")
+    with c1:
+        if os.path.exists(logo_path):
+            st.image(logo_path, use_container_width=True)
+    with c2:
+        st.markdown("<div class='topbar'>"
+                    "<h2>Producción Avícola — Estado Actual</h2>"
+                    "<div class='muted'>Panel operativo para seguimiento diario por lote, zona y alertas</div>"
+                    "</div>", unsafe_allow_html=True)
+    with c3:
+        st.markdown(f"<div class='pill'>Corte: {corte:%d-%m-%Y}</div>", unsafe_allow_html=True)
 
 # ============================================================
-# SECTION 1: KPIs GERENCIALES
+# KPI ROW
 # ============================================================
-st.markdown("## 🎯 Situación Actual (Resumen Ejecutivo)")
+lotes_tot = snap_f["LoteCompleto"].nunique() if "LoteCompleto" in snap_f.columns else 0
+lotes_abiertos = snap_f[snap_f.get("EstadoLote", "") == "ABIERTO"]["LoteCompleto"].nunique() if "EstadoLote" in snap_f.columns else 0
+lotes_cerrados = snap_f[snap_f.get("EstadoLote", "") == "CERRADO"]["LoteCompleto"].nunique() if "EstadoLote" in snap_f.columns else 0
+aves_vivas = snap_f["AvesVivas"].fillna(0).sum() if "AvesVivas" in snap_f.columns else 0
+mort_prom = snap_f["MortalidadPct"].mean() if "MortalidadPct" in snap_f.columns else np.nan
+peso_prom = snap_f["PesoActual"].mean() if "PesoActual" in snap_f.columns else np.nan
 
-kpi_cols = st.columns([1.2, 1, 1, 1.2, 1, 1])
-
-# Total lotes
-with kpi_cols[0]:
-    lotes_tot = snap_f["LoteCompleto"].nunique()
-    st.metric(
-        "Lotes Total",
-        f"{lotes_tot:,}",
-        delta=None,
-        help="Lotes únicos en período"
-    )
-
-# Abiertos
-with kpi_cols[1]:
-    lotes_abiertos = snap_f[snap_f["EstadoLote"] == "ABIERTO"]["LoteCompleto"].nunique() if "EstadoLote" in snap_f.columns else 0
-    st.metric("🔴 Activos", f"{lotes_abiertos:,}")
-
-# Cerrados
-with kpi_cols[2]:
-    lotes_cerrados = snap_f[snap_f["EstadoLote"] == "CERRADO"]["LoteCompleto"].nunique() if "EstadoLote" in snap_f.columns else 0
-    st.metric("✅ Cerrados", f"{lotes_cerrados:,}")
-
-# Aves vivas
-with kpi_cols[3]:
-    aves_vivas = snap_f["AvesVivas"].fillna(0).sum()
-    st.metric(
-        "Aves Vivas",
-        f"{int(aves_vivas):,}",
-        help="Población actual en engorde"
-    )
-
-# Mortalidad promedio
-with kpi_cols[4]:
-    mort_prom = snap_f["MortalidadPct"].mean() if "MortalidadPct" in snap_f.columns else np.nan
-    color_mort = "🔴" if pd.notna(mort_prom) and mort_prom >= mort_alert else "🟢"
-    st.metric(f"{color_mort} Mort. Prom.", f"{mort_prom:.2f}%" if pd.notna(mort_prom) else "—")
-
-# Peso promedio
-with kpi_cols[5]:
-    peso_prom = snap_f["PesoActual"].mean() if "PesoActual" in snap_f.columns else np.nan
-    st.metric("Peso Prom.", f"{peso_prom:.3f} kg" if pd.notna(peso_prom) else "—")
+k1, k2, k3, k4, k5, k6 = st.columns(6)
+with k1: kpi_card("Lotes total", f"{lotes_tot:,}", "Lotes únicos", True)
+with k2: kpi_card("Activos", f"{lotes_abiertos:,}", "Estado ABIERTO", True)
+with k3: kpi_card("Cerrados", f"{lotes_cerrados:,}", "Estado CERRADO", False)
+with k4: kpi_card("Aves vivas", fmt_int(aves_vivas), "Población actual", True)
+with k5: kpi_card("Mortalidad promedio", fmt_float(mort_prom, 2, "%"), f"Alerta ≥ {mort_alert}%", True)
+with k6: kpi_card("Peso promedio", fmt_float(peso_prom, 3, " kg"), "Peso actual", True)
 
 st.divider()
 
 # ============================================================
-# SECTION 2: LÍNEA PRODUCTIVA POR ETAPA
+# TABS NAVIGATION
 # ============================================================
-st.markdown("## 📊 Línea Productiva – Distribución por Etapa")
+tab1, tab2, tab3, tab4 = st.tabs(["Resumen", "Zonas", "Alertas", "Detalle por lote"])
 
-col_etapa, col_zona = st.columns([2, 1.5])
+# ============================================================
+# TAB 1: RESUMEN
+# ============================================================
+with tab1:
+    st.subheader("Distribución por etapa")
+    colA, colB = st.columns([2, 1.3])
 
-# Etapas
-with col_etapa:
-    if "Etapa" in snap_f.columns:
-        etapas_order = ["Inicio (1-14)", "Crecimiento (15-28)", "Pre-acabado (29-35)", "Acabado (36-42)", "Final (43+)"]
-        by_etapa = snap_f.groupby("Etapa", as_index=False).agg(
-            Lotes=("LoteCompleto", "nunique"),
+    with colA:
+        if "Etapa" in snap_f.columns and not snap_f.empty:
+            etapas_order = ["Inicio (1-14)", "Crecimiento (15-28)", "Pre-acabado (29-35)", "Acabado (36-42)", "Final (43+)"]
+            by_etapa = snap_f.groupby("Etapa", as_index=False).agg(
+                Lotes=("LoteCompleto", "nunique"),
+                AvesVivas=("AvesVivas", "sum"),
+                PesoPromedio=("PesoActual", "mean")
+            )
+            by_etapa["Etapa"] = pd.Categorical(by_etapa["Etapa"], categories=etapas_order, ordered=True)
+            by_etapa = by_etapa.sort_values("Etapa")
+
+            fig_etapa = px.bar(
+                by_etapa,
+                x="Etapa",
+                y="Lotes",
+                color="PesoPromedio",
+                color_continuous_scale=[(0, "#F3F4F6"), (1, PRONACA_RED)],
+                title="Lotes por etapa (color = peso promedio)",
+                labels={"Lotes": "Cantidad de lotes", "PesoPromedio": "Peso promedio (kg)"}
+            )
+            st.plotly_chart(apply_pronaca_plotly(fig_etapa, 390), use_container_width=True)
+        else:
+            st.info("No hay datos para mostrar en la distribución por etapa con los filtros actuales.")
+
+    with colB:
+        if "ZonaNombre" in snap_f.columns and not snap_f.empty:
+            by_zona = snap_f.groupby("ZonaNombre", as_index=False).agg(Lotes=("LoteCompleto", "nunique"))
+            fig_zona = px.pie(
+                by_zona,
+                names="ZonaNombre",
+                values="Lotes",
+                hole=0.55,
+                title="Participación por zona"
+            )
+            fig_zona.update_traces(textposition="inside", textinfo="percent+label")
+            st.plotly_chart(apply_pronaca_plotly(fig_zona, 390), use_container_width=True)
+        else:
+            st.info("No hay datos por zona para mostrar con los filtros actuales.")
+
+    st.subheader("Detalle por etapa")
+    if "Etapa" in snap_f.columns and not snap_f.empty:
+        etapa_detail = snap_f.groupby("Etapa", as_index=False).agg(
+            **{
+                "Lotes": ("LoteCompleto", "nunique"),
+                "Aves vivas": ("AvesVivas", "sum"),
+                "Peso promedio (kg)": ("PesoActual", "mean"),
+                "Mortalidad (%)": ("MortalidadPct", "mean"),
+                "Edad promedio": ("EdadActual", "mean")
+            }
+        ).sort_values("Edad promedio")
+
+        st.dataframe(etapa_detail.round(2), use_container_width=True, hide_index=True)
+    else:
+        st.info("No hay detalle por etapa disponible con los filtros actuales.")
+
+# ============================================================
+# TAB 2: ZONAS
+# ============================================================
+with tab2:
+    st.subheader("Indicadores por zona")
+
+    if "ZonaNombre" not in snap_f.columns or snap_f.empty:
+        st.info("No hay datos por zona con los filtros actuales.")
+    else:
+        zonas = sorted(snap_f["ZonaNombre"].dropna().unique())
+        cols = st.columns(min(4, max(1, len(zonas))))
+
+        for i, z in enumerate(zonas):
+            snap_z = snap_f[snap_f["ZonaNombre"] == z]
+            with cols[i % len(cols)]:
+                kpi_card("Zona", z, accent=True)
+                kpi_card("Lotes", f"{snap_z['LoteCompleto'].nunique():,}", accent=False)
+                kpi_card("Aves vivas", fmt_int(snap_z["AvesVivas"].fillna(0).sum()), accent=False)
+                kpi_card("Mortalidad promedio", fmt_float(snap_z["MortalidadPct"].mean(), 2, "%"), accent=False)
+
+        st.divider()
+        st.subheader("Aves vivas por zona")
+
+        by_z = snap_f.groupby("ZonaNombre", as_index=False).agg(
             AvesVivas=("AvesVivas", "sum"),
-            PesoPromedio=("PesoActual", "mean")
+            Lotes=("LoteCompleto", "nunique"),
+            PesoProm=("PesoActual", "mean"),
         )
-        by_etapa["Etapa"] = pd.Categorical(by_etapa["Etapa"], categories=etapas_order, ordered=True)
-        by_etapa = by_etapa.sort_values("Etapa")
-        
-        fig_etapa = px.bar(
-            by_etapa,
-            x="Etapa",
-            y="Lotes",
-            color="PesoPromedio",
-            color_continuous_scale="Viridis",
-            title="Lotes activos por etapa de engorde",
-            labels={"Lotes": "# Lotes", "PesoPromedio": "Peso prom. (kg)"}
+        fig = px.bar(
+            by_z,
+            x="ZonaNombre",
+            y="AvesVivas",
+            color="Lotes",
+            title="Aves vivas por zona (color = cantidad de lotes)",
+            labels={"ZonaNombre": "Zona", "AvesVivas": "Aves vivas", "Lotes": "Lotes"}
         )
-        fig_etapa.update_layout(height=380, showlegend=True)
-        st.plotly_chart(fig_etapa, use_container_width=True)
+        st.plotly_chart(apply_pronaca_plotly(fig, 420), use_container_width=True)
 
-# Zonas
-with col_zona:
-    if "Zona" in snap_f.columns:
-        by_zona = snap_f.groupby("Zona", as_index=False).agg(Lotes=("LoteCompleto", "nunique"))
-        
-        fig_zona = px.pie(
-            by_zona,
-            names="Zona",
-            values="Lotes",
-            title="Distribución por Zona",
-            hole=0.4
-        )
-        fig_zona.update_layout(height=380)
-        st.plotly_chart(fig_zona, use_container_width=True)
-
-# Tabla resumen por etapa
-st.markdown("### Detalle por Etapa")
-etapa_detail = snap_f.groupby("Etapa", as_index=False).agg(
-    **{
-        "Lotes": ("LoteCompleto", "nunique"),
-        "Aves Vivas": ("AvesVivas", "sum"),
-        "Peso Prom (kg)": ("PesoActual", "mean"),
-        "Mortalidad Pct": ("MortalidadPct", "mean"),
-        "Edad Prom": ("EdadActual", "mean")
-    }
-).sort_values("Edad Prom")
-
-st.dataframe(
-    etapa_detail.round(2),
-    use_container_width=True,
-    hide_index=True
-)
-
-st.divider()
+        st.subheader("Detalle por zona")
+        st.dataframe(by_z.round(2), use_container_width=True, hide_index=True)
 
 # ============================================================
-# SECTION 3: IMPACTO POR ZONA
+# TAB 3: ALERTAS
 # ============================================================
-if "Zona" in snap_f.columns and len(sel_zonas) > 0:
-    st.markdown("## 🗺️ Impacto por Zona")
-    
-    cols_zona = st.columns(len(sel_zonas))
-    
-    for idx, zona in enumerate(sorted(sel_zonas)):
-        snap_zona = snap_f[snap_f["Zona"] == zona]
-        
-        with cols_zona[idx]:
-            st.markdown(f"### {zona}")
-            
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                lotes_z = snap_zona["LoteCompleto"].nunique()
-                st.metric("Lotes", lotes_z)
-            with c2:
-                aves_z = snap_zona["AvesVivas"].fillna(0).sum()
-                st.metric("Aves", f"{int(aves_z):,}")
-            with c3:
-                mort_z = snap_zona["MortalidadPct"].mean()
-                st.metric("Mort %", f"{mort_z:.2f}%" if pd.notna(mort_z) else "—")
+with tab3:
+    st.subheader("Alertas operativas")
 
-st.divider()
+    if "MortalidadPct" not in snap_f.columns:
+        st.info("No existe la columna MortalidadPct en el dataset.")
+    else:
+        snap_alert = snap_f[snap_f["MortalidadPct"] >= mort_alert].copy()
 
-# ============================================================
-# SECTION 4: ALERTAS DE MORTALIDAD
-# ============================================================
-st.markdown("## ⚠️ Alertas – Acción Requerida")
+        if snap_alert.empty:
+            st.success("Sin lotes en alerta con el umbral actual.")
+        else:
+            st.warning(f"Lotes en alerta: {snap_alert['LoteCompleto'].nunique():,} (mortalidad ≥ {mort_alert}%)")
 
-snap_alert = snap_f[snap_f["MortalidadPct"] >= mort_alert].copy() if "MortalidadPct" in snap_f.columns else pd.DataFrame()
+            colC, colD = st.columns([1.6, 1])
+            with colC:
+                top = (snap_alert.drop_duplicates("LoteCompleto")
+                              .nlargest(15, "MortalidadPct")[["LoteCompleto", "MortalidadPct", "ZonaNombre"]])
+                top = top.sort_values("MortalidadPct")
 
-if not snap_alert.empty:
-    st.markdown(f"### 🔴 Mortalidad Alta (>= {mort_alert}%)")
-    
-    col_chart, col_table = st.columns([1.5, 1])
-    
-    with col_chart:
-        alert_chart = snap_alert.nlargest(15, "MortalidadPct")[["LoteCompleto", "MortalidadPct", "Zona"]].copy()
-        
-        fig_alert = px.bar(
-            alert_chart,
-            x="LoteCompleto",
-            y="MortalidadPct",
-            color="Zona",
-            title="Top lotes con mortalidad alta",
-            labels={"MortalidadPct": "Mortalidad (%)", "LoteCompleto": "Lote"}
-        )
-        fig_alert.update_layout(xaxis_tickangle=-45, height=380)
-        st.plotly_chart(fig_alert, use_container_width=True)
-    
-    with col_table:
-        st.markdown(f"**Lotes en alerta: {snap_alert['LoteCompleto'].nunique()}**")
-        alert_show = snap_alert[["LoteCompleto", "Zona", "EdadActual", "MortalidadPct", "Granja"]].drop_duplicates("LoteCompleto").sort_values("MortalidadPct", ascending=False).head(10)
-        st.dataframe(alert_show.round(2), use_container_width=True, hide_index=True)
-else:
-    st.success("✅ Sin alertas de mortalidad en los filtros aplicados.")
+                fig = px.bar(
+                    top,
+                    x="MortalidadPct",
+                    y="LoteCompleto",
+                    color="ZonaNombre",
+                    orientation="h",
+                    title="Top 15 lotes con mayor mortalidad",
+                    labels={"MortalidadPct": "Mortalidad (%)", "LoteCompleto": "Lote", "ZonaNombre": "Zona"}
+                )
+                st.plotly_chart(apply_pronaca_plotly(fig, 430), use_container_width=True)
 
-st.divider()
+            with colD:
+                cols_show = [c for c in ["LoteCompleto", "ZonaNombre", "Granja", "EdadActual", "MortalidadPct"] if c in snap_alert.columns]
+                table = (snap_alert[cols_show]
+                         .drop_duplicates("LoteCompleto")
+                         .sort_values("MortalidadPct", ascending=False)
+                         .head(12))
+                st.dataframe(table.round(2), use_container_width=True, hide_index=True)
 
 # ============================================================
-# SECTION 5: ANÁLISIS DETALLADO POR LOTE (CON RADIO BUTTONS)
+# TAB 4: DETALLE POR LOTE
 # ============================================================
-st.markdown("## 🔍 Análisis Detallado por Lote")
+with tab4:
+    st.subheader("Análisis detallado por lote")
 
-# Radio button para filtrar ABIERTO vs CERRADO
-col_radio1, col_radio2 = st.columns([3, 1])
-with col_radio1:
-    tipo_lote = st.radio(
-        "Filtrar por estado:",
-        ["📊 Todos", "🔴 Abiertos", "✅ Cerrados"],
+    tipo = st.radio(
+        "Estado",
+        ["Todos", "Abiertos", "Cerrados"],
         horizontal=True,
-        key="tipo_lote_radio"
+        key="tipo_lote"
     )
-with col_radio2:
-    st.empty()
 
-# Aplicar filtro de tipo
-if tipo_lote == "🔴 Abiertos":
-    lotes_avail = snap_f[snap_f["EstadoLote"] == "ABIERTO"]["LoteCompleto"].unique()
-elif tipo_lote == "✅ Cerrados":
-    lotes_avail = snap_f[snap_f["EstadoLote"] == "CERRADO"]["LoteCompleto"].unique()
-else:
-    lotes_avail = snap_f["LoteCompleto"].unique()
+    if tipo == "Abiertos":
+        lotes_avail = snap_f[snap_f.get("EstadoLote", "") == "ABIERTO"]["LoteCompleto"].unique()
+    elif tipo == "Cerrados":
+        lotes_avail = snap_f[snap_f.get("EstadoLote", "") == "CERRADO"]["LoteCompleto"].unique()
+    else:
+        lotes_avail = snap_f["LoteCompleto"].unique()
 
-lotes_list = sorted([l for l in lotes_avail if pd.notna(l)])
+    lotes_list = sorted([l for l in lotes_avail if pd.notna(l)])
 
-# Contabilización
-conteo_cols = st.columns([1, 1, 1])
+    lote_search = st.text_input("Buscar lote", key="lote_search", placeholder="Ej: BUC1006, STO5069, 2506-01 ...")
+    if lote_search:
+        lotes_list = [x for x in lotes_list if lote_search.upper() in str(x).upper()]
 
-with conteo_cols[0]:
-    total_lotes = snap_f["LoteCompleto"].nunique()
-    st.metric("Total Lotes", f"{total_lotes:,}")
+    if not lotes_list:
+        st.info("No hay lotes disponibles con los filtros actuales.")
+        st.stop()
 
-with conteo_cols[1]:
-    abiertos = snap_f[snap_f["EstadoLote"] == "ABIERTO"]["LoteCompleto"].nunique() if "EstadoLote" in snap_f.columns else 0
-    st.metric("🔴 Abiertos", f"{abiertos:,}")
+    lote_sel = st.selectbox("Seleccionar lote", lotes_list, key="lote_detail")
 
-with conteo_cols[2]:
-    cerrados = snap_f[snap_f["EstadoLote"] == "CERRADO"]["LoteCompleto"].nunique() if "EstadoLote" in snap_f.columns else 0
-    st.metric("✅ Cerrados", f"{cerrados:,}")
-
-# Mostrar según filtro
-st.markdown(f"### Lotes disponibles ({len(lotes_list)})")
-
-if len(lotes_list) > 0:
-    lote_sel = st.selectbox(
-        "Selecciona un lote",
-        lotes_list,
-        key="lote_detail"
-    )
-    
-    # Datos completos del lote seleccionado
     lote_data = df[df["LoteCompleto"] == lote_sel].sort_values("Edad").copy()
-    
-    if not lote_data.empty:
-        # Tarjetas
-        card_cols = st.columns([1, 1, 1, 1, 1])
-        
-        with card_cols[0]:
-            estado = lote_data["EstadoLote"].iloc[-1] if "EstadoLote" in lote_data.columns else "—"
-            st.metric("Estado", f"🔴 {estado}" if estado == "ABIERTO" else f"✅ {estado}")
-        
-        with card_cols[1]:
-            zona = lote_data["Zona"].iloc[-1] if "Zona" in lote_data.columns else "—"
-            st.metric("Zona", zona)
-        
-        with card_cols[2]:
-            granja = lote_data["Granja"].iloc[-1] if "Granja" in lote_data.columns else "—"
-            st.metric("Granja", granja)
-        
-        with card_cols[3]:
-            sexo = lote_data["Sexo"].iloc[-1] if "Sexo" in lote_data.columns else "—"
-            st.metric("Sexo", sexo)
-        
-        with card_cols[4]:
-            edad_max = int(lote_data["Edad"].max()) if "Edad" in lote_data.columns else 0
-            st.metric("Edad Actual", edad_max)
-        
-        # Gráficos
-        fig_col1, fig_col2 = st.columns(2)
-        
-        # Peso Final por Edad
-        with fig_col1:
-            if "PesoFinal" in lote_data.columns and "Edad" in lote_data.columns:
-                fig_peso = px.line(
-                    lote_data,
-                    x="Edad",
-                    y="PesoFinal",
-                    markers=True,
-                    title="PesoFinal por edad (curva + real)",
-                    labels={"PesoFinal": "Peso (kg)", "Edad": "Edad (días)"}
-                )
-                fig_peso.update_traces(marker=dict(size=6))
-                fig_peso.update_layout(height=380)
-                st.plotly_chart(fig_peso, use_container_width=True)
-        
-        # Mortalidad acumulada
-        with fig_col2:
-            if "MortalidadAcumulada" in lote_data.columns and "Edad" in lote_data.columns:
-                fig_mort = px.area(
-                    lote_data,
-                    x="Edad",
-                    y="MortalidadAcumulada",
-                    title="Mortalidad acumulada por edad",
-                    labels={"MortalidadAcumulada": "# Aves", "Edad": "Edad (días)"}
-                )
-                fig_mort.update_layout(height=380)
-                st.plotly_chart(fig_mort, use_container_width=True)
-        
-        # Tabla completa
-        st.markdown("### Datos Completos del Lote")
-        cols_show = [c for c in ["Edad", "Peso", "PesoFinal", "FechaTransaccion", "Mortalidad", 
-                                  "Descarte", "MortalidadAcumulada", "AvesVivas", "Galpon"] 
-                     if c in lote_data.columns]
-        st.dataframe(
-            lote_data[cols_show],
-            use_container_width=True,
-            height=350
-        )
-else:
-    st.info(f"No hay lotes {tipo_lote} en los filtros aplicados.")
+    if lote_data.empty:
+        st.info("No hay información para el lote seleccionado.")
+        st.stop()
+
+    # Cards de lote
+    estado = lote_data["EstadoLote"].iloc[-1] if "EstadoLote" in lote_data.columns else "—"
+    zona = zona_nombre(lote_data["Zona"].iloc[-1]) if "Zona" in lote_data.columns else "—"
+    granja = lote_data["Granja"].iloc[-1] if "Granja" in lote_data.columns else "—"
+    sexo = lote_data["Sexo"].iloc[-1] if "Sexo" in lote_data.columns else "S"
+    edad_max = int(lote_data["Edad"].max()) if "Edad" in lote_data.columns and pd.notna(lote_data["Edad"].max()) else 0
+
+    # Desviación vs curva en el último día (si existe)
+    peso_last = lote_data["PesoFinal"].iloc[-1] if "PesoFinal" in lote_data.columns else np.nan
+    exp_last = CURVA.get(edad_max, {}).get(str(sexo).upper(), CURVA.get(edad_max, {}).get("S", np.nan))
+    delta_curva = (peso_last - exp_last) if pd.notna(peso_last) and pd.notna(exp_last) else np.nan
+
+    a, b, c, d, e, f = st.columns(6)
+    with a: kpi_card("Lote", str(lote_sel), accent=True)
+    with b: kpi_card("Estado", str(estado), accent=False)
+    with c: kpi_card("Zona", str(zona), accent=False)
+    with d: kpi_card("Granja", str(granja), accent=False)
+    with e: kpi_card("Edad actual", f"{edad_max}", accent=False)
+    with f: kpi_card("Desviación vs curva", fmt_float(delta_curva, 3, " kg"), accent=True)
+
+    st.divider()
+
+    col1, col2 = st.columns(2)
+
+    # Peso real vs curva
+    with col1:
+        if "PesoFinal" in lote_data.columns and "Edad" in lote_data.columns:
+            edades = lote_data["Edad"].dropna().astype(int).tolist()
+            curva_y = curva_series(sexo, edades)
+
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=lote_data["Edad"], y=lote_data["PesoFinal"],
+                mode="lines+markers", name="Real (PesoFinal)"
+            ))
+            fig.add_trace(go.Scatter(
+                x=edades, y=curva_y,
+                mode="lines", name="Curva biológica", line=dict(dash="dash")
+            ))
+            fig.update_layout(title="Peso por edad (real vs curva)", xaxis_title="Edad (días)", yaxis_title="Peso (kg)")
+            st.plotly_chart(apply_pronaca_plotly(fig, 430), use_container_width=True)
+        else:
+            st.info("No existe información suficiente para graficar PesoFinal vs Edad.")
+
+    # Mortalidad acumulada
+    with col2:
+        if "MortalidadAcumulada" in lote_data.columns and "Edad" in lote_data.columns:
+            fig_m = px.area(
+                lote_data,
+                x="Edad",
+                y="MortalidadAcumulada",
+                title="Mortalidad acumulada por edad",
+                labels={"MortalidadAcumulada": "Aves", "Edad": "Edad (días)"}
+            )
+            st.plotly_chart(apply_pronaca_plotly(fig_m, 430), use_container_width=True)
+        else:
+            st.info("No existe información suficiente para graficar MortalidadAcumulada vs Edad.")
+
+    st.subheader("Datos del lote")
+    cols_show = [c for c in [
+        "FechaTransaccion", "Edad", "Peso", "PesoFinal",
+        "Mortalidad", "Descarte", "MortalidadAcumulada",
+        "AvesVivas", "Aves Neto", "Galpon"
+    ] if c in lote_data.columns]
+
+    st.dataframe(lote_data[cols_show], use_container_width=True, height=420)
 
 # ============================================================
 # FOOTER
 # ============================================================
 st.divider()
-st.markdown("""
----
-**Dashboard de Producción AHORA** | Enfocado en estado actual, no comparaciones históricas ni proyecciones.
-""")
+st.caption("PRONACA | Producción Avícola — Panel operativo (estado actual)")
