@@ -16,16 +16,21 @@ st.set_page_config(
 )
 
 # ============================================================
-# PRONACA STYLE (colors)
+# BRAND COLORS (Pronaca)
 # ============================================================
 PRONACA_RED = "#DA291C"
 PRONACA_BLACK = "#0B0B0C"
-BG = "#F3F4F6"
-CARD = "#FFFFFF"
-BORDER = "#E5E7EB"
-MUTED = "#6B7280"
+PRONACA_GRAY = "#6B7280"
 
-PRONACA_COLORWAY = [PRONACA_RED, PRONACA_BLACK, "#6B7280", "#F59E0B", "#16A34A"]
+# Tema único (NO modo oscuro)
+BG = "#EEF2F6"        # fondo gris suave (no blanco)
+CARD = "#FBFCFE"      # tarjetas “off-white” (menos brillo)
+TOPBAR = "#FBFCFE"
+BORDER = "#D6D6E8"
+TEXT = "#0F172A"
+MUTED = "#475569"
+PLOTLY_TEMPLATE = "plotly_white"
+PRONACA_COLORWAY = [PRONACA_RED, PRONACA_BLACK, PRONACA_GRAY, "#F59E0B", "#16A34A"]
 
 # ============================================================
 # CURVA BIOLOGICA (kg/ave)
@@ -83,149 +88,36 @@ CURVA = {
 }
 
 # ============================================================
-# CSS (corporate)
-# ============================================================
-st.markdown(f"""
-<style>
-  .stApp {{
-    background: {BG};
-  }}
-  .block-container {{
-    padding-top: 1.2rem;
-    padding-bottom: 2.0rem;
-  }}
-  section[data-testid="stSidebar"] {{
-    background: {CARD};
-    border-right: 1px solid {BORDER};
-  }}
-  h1, h2, h3 {{
-    letter-spacing: -0.02em;
-    color: {PRONACA_BLACK};
-  }}
-  .muted {{
-    color: {MUTED};
-    font-size: 0.95rem;
-  }}
-  .topbar {{
-    background: {CARD};
-    border: 1px solid {BORDER};
-    border-radius: 16px;
-    padding: 14px 16px;
-    box-shadow: 0 1px 10px rgba(0,0,0,0.04);
-    margin-bottom: 14px;
-  }}
-  .kpi-card {{
-    background: {CARD};
-    border: 1px solid {BORDER};
-    border-radius: 14px;
-    padding: 14px 14px 12px 14px;
-    box-shadow: 0 1px 8px rgba(0,0,0,0.04);
-  }}
-  .kpi-accent {{
-    border-left: 6px solid {PRONACA_RED};
-  }}
-  .kpi-label {{
-    color: {MUTED};
-    font-size: 0.85rem;
-    margin-bottom: 6px;
-  }}
-  .kpi-value {{
-    font-size: 1.55rem;
-    font-weight: 800;
-    line-height: 1.1;
-    color: {PRONACA_BLACK};
-  }}
-  .pill {{
-    display: inline-block;
-    padding: 6px 10px;
-    border: 1px solid {BORDER};
-    border-radius: 999px;
-    background: {CARD};
-    color: {MUTED};
-    font-size: 0.85rem;
-  }}
-  div[data-testid="stDataFrame"] {{
-    background: {CARD};
-    border: 1px solid {BORDER};
-    border-radius: 14px;
-    overflow: hidden;
-  }}
-</style>
-""", unsafe_allow_html=True)
-
-# ============================================================
 # HELPERS
 # ============================================================
-def to_dt(s):
-    return pd.to_datetime(s, errors="coerce")
-
-def to_num(s):
-    return pd.to_numeric(s, errors="coerce")
+def to_dt(s): return pd.to_datetime(s, errors="coerce")
+def to_num(s): return pd.to_numeric(s, errors="coerce")
 
 def fmt_int(x):
-    try:
-        return f"{int(x):,}"
-    except:
-        return "—"
+    try: return f"{int(x):,}"
+    except: return "—"
 
 def fmt_float(x, nd=2, suf=""):
     try:
-        if pd.isna(x):
-            return "—"
+        if pd.isna(x): return "—"
         return f"{float(x):.{nd}f}{suf}"
     except:
         return "—"
 
 def get_etapa(edad):
-    try:
-        e = float(edad)
-    except:
-        return "Desconocido"
-    if e <= 14:
-        return "Inicio (1-14)"
-    elif e <= 28:
-        return "Crecimiento (15-28)"
-    elif e <= 35:
-        return "Pre-acabado (29-35)"
-    elif e <= 42:
-        return "Acabado (36-42)"
-    else:
-        return "Final (43+)"
+    try: e = float(edad)
+    except: return "Desconocido"
+    if e <= 14: return "Inicio (1-14)"
+    if e <= 28: return "Crecimiento (15-28)"
+    if e <= 35: return "Pre-acabado (29-35)"
+    if e <= 42: return "Acabado (36-42)"
+    return "Final (43+)"
 
 def zona_nombre(z):
     z = str(z).upper()
-    if z == "BUC":
-        return "Bucayá"
-    if z == "STO":
-        return "Santo Domingo"
+    if z == "BUC": return "Bucayá"
+    if z == "STO": return "Santo Domingo"
     return "Otro"
-
-def apply_pronaca_plotly(fig, height=380):
-    fig.update_layout(
-        template="plotly_white",
-        height=height,
-        colorway=PRONACA_COLORWAY,
-        font=dict(family="Arial", size=13, color=PRONACA_BLACK),
-        title=dict(font=dict(size=16, color=PRONACA_BLACK)),
-        margin=dict(l=10, r=10, t=55, b=10),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-    )
-    fig.update_xaxes(showgrid=True, gridcolor=BORDER, zeroline=False)
-    fig.update_yaxes(showgrid=True, gridcolor=BORDER, zeroline=False)
-    return fig
-
-def kpi_card(label, value, sub=None, accent=True):
-    cls = "kpi-card kpi-accent" if accent else "kpi-card"
-    sub_html = f"<div class='muted'>{sub}</div>" if sub else ""
-    st.markdown(f"""
-    <div class="{cls}">
-      <div class="kpi-label">{label}</div>
-      <div class="kpi-value">{value}</div>
-      {sub_html}
-    </div>
-    """, unsafe_allow_html=True)
 
 def curva_series(sexo: str, edades: list[int]):
     sexo = (sexo or "S").upper()
@@ -237,6 +129,12 @@ def curva_series(sexo: str, edades: list[int]):
             out.append(np.nan)
     return out
 
+def reset_filters():
+    keys = ["zonas", "estados", "sexos", "mort_alert", "lote_search", "lote_detail", "tipo_lote"]
+    for k in keys:
+        if k in st.session_state:
+            del st.session_state[k]
+
 @st.cache_data(show_spinner=False)
 def load_excel(file_path_or_bytes):
     try:
@@ -244,12 +142,10 @@ def load_excel(file_path_or_bytes):
     except Exception:
         df = pd.read_excel(file_path_or_bytes, engine="openpyxl")
 
-    # Fechas
     for c in ["FechaTransaccion", "Cierre de campaña", "Fecha recepción"]:
         if c in df.columns:
             df[c] = to_dt(df[c])
 
-    # Números
     num_cols = [
         "Edad","Peso","PesoFinal","Mortalidad","Descarte","MortalidadTotalDia","MortalidadAcumulada",
         "Aves Planta","Aves Neto","AvesVivas","EdadVenta","Kilos Neto","AvesVivasVenta","PesoSalidaKg",
@@ -259,13 +155,11 @@ def load_excel(file_path_or_bytes):
         if c in df.columns:
             df[c] = to_num(df[c])
 
-    # Strings
     if "Sexo" in df.columns:
         df["Sexo"] = df["Sexo"].astype(str).str.upper().replace({"NAN": np.nan, "NONE": np.nan})
     if "EstadoLote" in df.columns:
         df["EstadoLote"] = df["EstadoLote"].astype(str).str.upper()
 
-    # Zona (BUC / STO)
     if "LoteCompleto" in df.columns:
         df["Zona"] = df["LoteCompleto"].astype(str).str.extract(r"^(BUC|STO)", expand=False)
 
@@ -279,14 +173,12 @@ def build_snapshot(df, corte_dt=None):
     if corte_dt is not None and "FechaTransaccion" in d.columns:
         d = d[d["FechaTransaccion"].notna() & (d["FechaTransaccion"] <= corte_dt)]
 
-    # Última fila por lote
     if "FechaTransaccion" in d.columns:
         d = d.sort_values(["LoteCompleto", "FechaTransaccion", "Edad"])
     else:
         d = d.sort_values(["LoteCompleto", "Edad"])
 
     last = d.groupby("LoteCompleto").tail(1).copy()
-
     last["EdadActual"] = last.get("Edad", np.nan)
     last["PesoActual"] = last.get("PesoFinal", last.get("Peso", np.nan))
     last["Etapa"] = last["EdadActual"].apply(get_etapa)
@@ -298,11 +190,139 @@ def build_snapshot(df, corte_dt=None):
             np.nan
         )
 
-    # Zona legible
     if "Zona" in last.columns:
         last["ZonaNombre"] = last["Zona"].apply(zona_nombre)
 
     return last
+
+# ============================================================
+# CSS (Tema único Pronaca + fondo suave)
+# ============================================================
+st.markdown(f"""
+<style>
+  html, body, [data-testid="stAppViewContainer"], .stApp {{
+    background: {BG} !important;
+  }}
+
+  .stApp, .stApp p, .stApp span, .stApp div, .stApp label {{
+    color: {TEXT} !important;
+  }}
+
+  /* Sidebar */
+  section[data-testid="stSidebar"] {{
+    background: {CARD} !important;
+    border-right: 1px solid {BORDER} !important;
+  }}
+
+  /* Evitar bloques raros en <code> */
+  code {{
+    background: transparent !important;
+    color: {TEXT} !important;
+    padding: 0 !important;
+  }}
+
+  /* Header */
+  .topbar {{
+    background: {TOPBAR} !important;
+    border: 1px solid {BORDER} !important;
+    border-radius: 16px;
+    padding: 14px 16px;
+    box-shadow: 0 1px 12px rgba(0,0,0,0.08);
+    margin-bottom: 12px;
+  }}
+  .topbar h2 {{
+    margin: 0;
+    font-weight: 900;
+    color: {TEXT} !important;
+  }}
+  .muted {{
+    color: {MUTED} !important;
+    font-size: 0.95rem;
+    margin-top: 2px;
+  }}
+
+  /* KPI */
+  .kpi-card {{
+    background: {CARD} !important;
+    border: 1px solid {BORDER} !important;
+    border-radius: 14px;
+    padding: 14px 14px 12px 14px;
+    box-shadow: 0 1px 10px rgba(0,0,0,0.08);
+  }}
+  .kpi-accent {{
+    border-left: 6px solid {PRONACA_RED} !important;
+  }}
+  .kpi-label {{
+    color: {MUTED} !important;
+    font-size: 0.85rem;
+    margin-bottom: 6px;
+    font-weight: 800;
+  }}
+  .kpi-value {{
+    font-size: 1.55rem;
+    font-weight: 950;
+    line-height: 1.1;
+    color: {TEXT} !important;
+  }}
+
+  /* Corte pill */
+  .pill {{
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 16px;
+    border: 1px solid {BORDER} !important;
+    border-radius: 999px;
+    background: {CARD} !important;
+    color: {TEXT} !important;
+    font-size: 1.06rem;
+    font-weight: 900;
+    box-shadow: 0 1px 10px rgba(0,0,0,0.08);
+  }}
+  .pill span {{
+    color: {MUTED} !important;
+    font-weight: 900;
+  }}
+
+  /* Tabs */
+  div[data-baseweb="tab-list"] {{
+    background: transparent !important;
+    padding: 6px 2px 10px 2px;
+    border-bottom: none !important;
+    gap: 8px !important;
+  }}
+  button[data-baseweb="tab"] {{
+    background: #F5F8FC !important;
+    border: 1px solid {BORDER} !important;
+    border-radius: 12px !important;
+    padding: 10px 14px !important;
+    font-weight: 900 !important;
+    color: {TEXT} !important;
+    font-size: 1.02rem !important;
+  }}
+  button[data-baseweb="tab"][aria-selected="true"] {{
+    background: {CARD} !important;
+    border: 2px solid {PRONACA_RED} !important;
+    box-shadow: 0 1px 12px rgba(0,0,0,0.10);
+  }}
+
+  /* Plotly container */
+  div[data-testid="stPlotlyChart"] {{
+    background: {CARD} !important;
+    border: 1px solid {BORDER} !important;
+    border-radius: 14px !important;
+    padding: 8px !important;
+  }}
+
+  /* Dataframe container */
+  div[data-testid="stDataFrame"] {{
+    background: {CARD} !important;
+    border: 1px solid {BORDER} !important;
+    border-radius: 14px !important;
+    overflow: hidden !important;
+  }}
+</style>
+""", unsafe_allow_html=True)
 
 # ============================================================
 # LOAD DATA
@@ -321,19 +341,12 @@ corte = df["FechaTransaccion"].max() if "FechaTransaccion" in df.columns else da
 snap = build_snapshot(df, corte_dt=corte)
 
 # ============================================================
-# SIDEBAR (filters)
+# SIDEBAR
 # ============================================================
-def reset_filters():
-    keys = ["zonas", "estados", "sexos", "mort_alert", "lote_search", "lote_detail", "tipo_lote"]
-    for k in keys:
-        if k in st.session_state:
-            del st.session_state[k]
-
 with st.sidebar:
     st.markdown("### Datos")
-    st.write("Archivo:", default_path)
-    st.write("Corte:", corte.date() if pd.notna(corte) else "N/A")
-    st.divider()
+    st.markdown(f"**Archivo:** {default_path}")
+    st.markdown(f"**Corte:** {corte:%Y-%m-%d}")
 
     c1, c2 = st.columns(2)
     with c1:
@@ -350,15 +363,12 @@ with st.sidebar:
     st.divider()
     st.markdown("### Filtros")
 
-    # Zona
     zonas_avail = sorted(snap["ZonaNombre"].dropna().unique()) if "ZonaNombre" in snap.columns else []
     sel_zonas = st.multiselect("Zona", options=zonas_avail, default=zonas_avail, key="zonas")
 
-    # Estado
     estados_avail = sorted(snap["EstadoLote"].dropna().unique()) if "EstadoLote" in snap.columns else ["ABIERTO", "CERRADO"]
     sel_estados = st.multiselect("Estado lote", options=estados_avail, default=estados_avail, key="estados")
 
-    # Sexo
     sexos_avail = sorted(snap["Sexo"].dropna().unique()) if "Sexo" in snap.columns else []
     sel_sexos = st.multiselect("Sexo", options=sexos_avail, default=sexos_avail, key="sexos")
 
@@ -366,7 +376,9 @@ with st.sidebar:
     st.markdown("### Umbral")
     mort_alert = st.slider("Alerta mortalidad (%)", 0, 20, 7, 1, key="mort_alert")
 
-# Apply filters
+# ============================================================
+# APPLY FILTERS
+# ============================================================
 snap_f = snap.copy()
 if sel_zonas and "ZonaNombre" in snap_f.columns:
     snap_f = snap_f[snap_f["ZonaNombre"].isin(sel_zonas)]
@@ -376,25 +388,56 @@ if sel_sexos and "Sexo" in snap_f.columns:
     snap_f = snap_f[snap_f["Sexo"].isin(sel_sexos)]
 
 # ============================================================
-# TOP HEADER
+# PLOTLY STYLING
+# ============================================================
+def apply_pronaca_plotly(fig, height=380):
+    fig.update_layout(
+        template=PLOTLY_TEMPLATE,
+        height=height,
+        colorway=PRONACA_COLORWAY,
+        font=dict(family="Arial", size=13, color=TEXT),
+        title=dict(font=dict(size=16, color=TEXT)),
+        margin=dict(l=10, r=10, t=55, b=10),
+        paper_bgcolor=CARD,
+        plot_bgcolor=CARD,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    )
+    fig.update_xaxes(showgrid=True, gridcolor=BORDER, zeroline=False, color=TEXT)
+    fig.update_yaxes(showgrid=True, gridcolor=BORDER, zeroline=False, color=TEXT)
+    return fig
+
+def kpi_card(label, value, sub=None, accent=True):
+    cls = "kpi-card kpi-accent" if accent else "kpi-card"
+    sub_html = f"<div class='muted'>{sub}</div>" if sub else ""
+    st.markdown(f"""
+    <div class="{cls}">
+      <div class="kpi-label">{label}</div>
+      <div class="kpi-value">{value}</div>
+      {sub_html}
+    </div>
+    """, unsafe_allow_html=True)
+
+# ============================================================
+# HEADER
 # ============================================================
 logo_path = "assets/pronaca.png"
-
-with st.container():
-    c1, c2, c3 = st.columns([0.18, 0.62, 0.20], vertical_alignment="center")
-    with c1:
-        if os.path.exists(logo_path):
-            st.image(logo_path, use_container_width=True)
-    with c2:
-        st.markdown("<div class='topbar'>"
-                    "<h2>Producción Avícola — Estado Actual</h2>"
-                    "<div class='muted'>Panel operativo para seguimiento diario por lote, zona y alertas</div>"
-                    "</div>", unsafe_allow_html=True)
-    with c3:
-        st.markdown(f"<div class='pill'>Corte: {corte:%d-%m-%Y}</div>", unsafe_allow_html=True)
+c1, c2, c3 = st.columns([0.18, 0.60, 0.22], vertical_alignment="center")
+with c1:
+    if os.path.exists(logo_path):
+        st.image(logo_path, use_container_width=True)
+with c2:
+    st.markdown(
+        "<div class='topbar'>"
+        "<h2>Producción Avícola — Estado Actual</h2>"
+        "<div class='muted'>Seguimiento operativo por lote, zona y alertas</div>"
+        "</div>",
+        unsafe_allow_html=True
+    )
+with c3:
+    st.markdown(f"<div class='pill'><span>Corte</span> {corte:%d-%m-%Y}</div>", unsafe_allow_html=True)
 
 # ============================================================
-# KPI ROW
+# KPIs
 # ============================================================
 lotes_tot = snap_f["LoteCompleto"].nunique() if "LoteCompleto" in snap_f.columns else 0
 lotes_abiertos = snap_f[snap_f.get("EstadoLote", "") == "ABIERTO"]["LoteCompleto"].nunique() if "EstadoLote" in snap_f.columns else 0
@@ -414,7 +457,7 @@ with k6: kpi_card("Peso promedio", fmt_float(peso_prom, 3, " kg"), "Peso actual"
 st.divider()
 
 # ============================================================
-# TABS NAVIGATION
+# TABS
 # ============================================================
 tab1, tab2, tab3, tab4 = st.tabs(["Resumen", "Zonas", "Alertas", "Detalle por lote"])
 
@@ -423,6 +466,7 @@ tab1, tab2, tab3, tab4 = st.tabs(["Resumen", "Zonas", "Alertas", "Detalle por lo
 # ============================================================
 with tab1:
     st.subheader("Distribución por etapa")
+
     colA, colB = st.columns([2, 1.3])
 
     with colA:
@@ -441,13 +485,13 @@ with tab1:
                 x="Etapa",
                 y="Lotes",
                 color="PesoPromedio",
-                color_continuous_scale=[(0, "#F3F4F6"), (1, PRONACA_RED)],
+                color_continuous_scale=[(0, "#F1F5F9"), (1, PRONACA_RED)],
                 title="Lotes por etapa (color = peso promedio)",
                 labels={"Lotes": "Cantidad de lotes", "PesoPromedio": "Peso promedio (kg)"}
             )
             st.plotly_chart(apply_pronaca_plotly(fig_etapa, 390), use_container_width=True)
         else:
-            st.info("No hay datos para mostrar en la distribución por etapa con los filtros actuales.")
+            st.info("No hay datos para mostrar con los filtros actuales.")
 
     with colB:
         if "ZonaNombre" in snap_f.columns and not snap_f.empty:
@@ -475,7 +519,6 @@ with tab1:
                 "Edad promedio": ("EdadActual", "mean")
             }
         ).sort_values("Edad promedio")
-
         st.dataframe(etapa_detail.round(2), use_container_width=True, hide_index=True)
     else:
         st.info("No hay detalle por etapa disponible con los filtros actuales.")
@@ -489,36 +532,28 @@ with tab2:
     if "ZonaNombre" not in snap_f.columns or snap_f.empty:
         st.info("No hay datos por zona con los filtros actuales.")
     else:
-        zonas = sorted(snap_f["ZonaNombre"].dropna().unique())
-        cols = st.columns(min(4, max(1, len(zonas))))
-
-        for i, z in enumerate(zonas):
-            snap_z = snap_f[snap_f["ZonaNombre"] == z]
-            with cols[i % len(cols)]:
-                kpi_card("Zona", z, accent=True)
-                kpi_card("Lotes", f"{snap_z['LoteCompleto'].nunique():,}", accent=False)
-                kpi_card("Aves vivas", fmt_int(snap_z["AvesVivas"].fillna(0).sum()), accent=False)
-                kpi_card("Mortalidad promedio", fmt_float(snap_z["MortalidadPct"].mean(), 2, "%"), accent=False)
-
-        st.divider()
-        st.subheader("Aves vivas por zona")
-
         by_z = snap_f.groupby("ZonaNombre", as_index=False).agg(
             AvesVivas=("AvesVivas", "sum"),
             Lotes=("LoteCompleto", "nunique"),
             PesoProm=("PesoActual", "mean"),
+            MortProm=("MortalidadPct", "mean"),
         )
+
         fig = px.bar(
             by_z,
             x="ZonaNombre",
             y="AvesVivas",
             color="Lotes",
             title="Aves vivas por zona (color = cantidad de lotes)",
-            labels={"ZonaNombre": "Zona", "AvesVivas": "Aves vivas", "Lotes": "Lotes"}
+            labels={"ZonaNombre": "Zona", "AvesVivas": "Aves vivas", "Lotes": "Lotes"},
+            # 👇 Escala que NUNCA llega a blanco
+            color_continuous_scale=[
+                (0.0, "#64748B"),   # gris/azul oscuro para el mínimo
+                (1.0, PRONACA_RED)  # rojo Pronaca para el máximo
+            ],
+            range_color=(by_z["Lotes"].min(), by_z["Lotes"].max())
         )
         st.plotly_chart(apply_pronaca_plotly(fig, 420), use_container_width=True)
-
-        st.subheader("Detalle por zona")
         st.dataframe(by_z.round(2), use_container_width=True, hide_index=True)
 
 # ============================================================
@@ -568,12 +603,7 @@ with tab3:
 with tab4:
     st.subheader("Análisis detallado por lote")
 
-    tipo = st.radio(
-        "Estado",
-        ["Todos", "Abiertos", "Cerrados"],
-        horizontal=True,
-        key="tipo_lote"
-    )
+    tipo = st.radio("Estado", ["Todos", "Abiertos", "Cerrados"], horizontal=True, key="tipo_lote")
 
     if tipo == "Abiertos":
         lotes_avail = snap_f[snap_f.get("EstadoLote", "") == "ABIERTO"]["LoteCompleto"].unique()
@@ -583,73 +613,68 @@ with tab4:
         lotes_avail = snap_f["LoteCompleto"].unique()
 
     lotes_list = sorted([l for l in lotes_avail if pd.notna(l)])
-
-    lote_search = st.text_input("Buscar lote", key="lote_search", placeholder="Ej: BUC1006, STO5069, 2506-01 ...")
-    if lote_search:
-        lotes_list = [x for x in lotes_list if lote_search.upper() in str(x).upper()]
+    search = st.text_input("Buscar lote", key="lote_search", placeholder="Ej: BUC1006, STO5069, 2506-01")
+    if search:
+        lotes_list = [x for x in lotes_list if search.upper() in str(x).upper()]
 
     if not lotes_list:
         st.info("No hay lotes disponibles con los filtros actuales.")
         st.stop()
 
     lote_sel = st.selectbox("Seleccionar lote", lotes_list, key="lote_detail")
-
     lote_data = df[df["LoteCompleto"] == lote_sel].sort_values("Edad").copy()
     if lote_data.empty:
         st.info("No hay información para el lote seleccionado.")
         st.stop()
 
-    # Cards de lote
     estado = lote_data["EstadoLote"].iloc[-1] if "EstadoLote" in lote_data.columns else "—"
     zona = zona_nombre(lote_data["Zona"].iloc[-1]) if "Zona" in lote_data.columns else "—"
     granja = lote_data["Granja"].iloc[-1] if "Granja" in lote_data.columns else "—"
     sexo = lote_data["Sexo"].iloc[-1] if "Sexo" in lote_data.columns else "S"
     edad_max = int(lote_data["Edad"].max()) if "Edad" in lote_data.columns and pd.notna(lote_data["Edad"].max()) else 0
 
-    # Desviación vs curva en el último día (si existe)
     peso_last = lote_data["PesoFinal"].iloc[-1] if "PesoFinal" in lote_data.columns else np.nan
     exp_last = CURVA.get(edad_max, {}).get(str(sexo).upper(), CURVA.get(edad_max, {}).get("S", np.nan))
     delta_curva = (peso_last - exp_last) if pd.notna(peso_last) and pd.notna(exp_last) else np.nan
 
+    # Tarjetas del lote
+    def kpi_card_local(label, value, accent=False):
+        cls = "kpi-card kpi-accent" if accent else "kpi-card"
+        st.markdown(f"""
+        <div class="{cls}">
+          <div class="kpi-label">{label}</div>
+          <div class="kpi-value" style="font-size:1.25rem">{value}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
     a, b, c, d, e, f = st.columns(6)
-    with a: kpi_card("Lote", str(lote_sel), accent=True)
-    with b: kpi_card("Estado", str(estado), accent=False)
-    with c: kpi_card("Zona", str(zona), accent=False)
-    with d: kpi_card("Granja", str(granja), accent=False)
-    with e: kpi_card("Edad actual", f"{edad_max}", accent=False)
-    with f: kpi_card("Desviación vs curva", fmt_float(delta_curva, 3, " kg"), accent=True)
+    with a: kpi_card_local("Lote", str(lote_sel), accent=True)
+    with b: kpi_card_local("Estado", str(estado))
+    with c: kpi_card_local("Zona", str(zona))
+    with d: kpi_card_local("Granja", str(granja))
+    with e: kpi_card_local("Edad actual", f"{edad_max}")
+    with f: kpi_card_local("Desviación vs curva", fmt_float(delta_curva, 3, " kg"), accent=True)
 
     st.divider()
 
     col1, col2 = st.columns(2)
-
-    # Peso real vs curva
     with col1:
         if "PesoFinal" in lote_data.columns and "Edad" in lote_data.columns:
             edades = lote_data["Edad"].dropna().astype(int).tolist()
             curva_y = curva_series(sexo, edades)
 
             fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=lote_data["Edad"], y=lote_data["PesoFinal"],
-                mode="lines+markers", name="Real (PesoFinal)"
-            ))
-            fig.add_trace(go.Scatter(
-                x=edades, y=curva_y,
-                mode="lines", name="Curva biológica", line=dict(dash="dash")
-            ))
+            fig.add_trace(go.Scatter(x=lote_data["Edad"], y=lote_data["PesoFinal"], mode="lines+markers", name="Real (PesoFinal)"))
+            fig.add_trace(go.Scatter(x=edades, y=curva_y, mode="lines", name="Curva biológica", line=dict(dash="dash")))
             fig.update_layout(title="Peso por edad (real vs curva)", xaxis_title="Edad (días)", yaxis_title="Peso (kg)")
             st.plotly_chart(apply_pronaca_plotly(fig, 430), use_container_width=True)
         else:
             st.info("No existe información suficiente para graficar PesoFinal vs Edad.")
 
-    # Mortalidad acumulada
     with col2:
         if "MortalidadAcumulada" in lote_data.columns and "Edad" in lote_data.columns:
             fig_m = px.area(
-                lote_data,
-                x="Edad",
-                y="MortalidadAcumulada",
+                lote_data, x="Edad", y="MortalidadAcumulada",
                 title="Mortalidad acumulada por edad",
                 labels={"MortalidadAcumulada": "Aves", "Edad": "Edad (días)"}
             )
@@ -663,11 +688,7 @@ with tab4:
         "Mortalidad", "Descarte", "MortalidadAcumulada",
         "AvesVivas", "Aves Neto", "Galpon"
     ] if c in lote_data.columns]
-
     st.dataframe(lote_data[cols_show], use_container_width=True, height=420)
 
-# ============================================================
-# FOOTER
-# ============================================================
 st.divider()
 st.caption("PRONACA | Producción Avícola — Panel operativo (estado actual)")
