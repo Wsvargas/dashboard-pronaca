@@ -115,7 +115,7 @@ def get_etapa(edad):
 
 def zona_nombre(z):
     z = str(z).upper()
-    if z == "BUC": return "Bucayá"
+    if z == "BUC": return "Bucay"
     if z == "STO": return "Santo Domingo"
     return "Otro"
 
