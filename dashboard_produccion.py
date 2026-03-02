@@ -36,6 +36,22 @@ st.set_page_config(
 )
 
 # ──────────────────────────────────────────────────────────────
+# CONFIGURACIÓN DE TEMA (En lugar de config.toml)
+# ──────────────────────────────────────────────────────────────
+THEME_CONFIG = """
+<script>
+    // Inyectar estilos de tema personalizados
+    document.documentElement.style.setProperty('--primary-color', '#DA291C');
+    document.documentElement.style.setProperty('--background-color', '#F3F4F6');
+    document.documentElement.style.setProperty('--secondary-background-color', '#FFFFFF');
+    document.documentElement.style.setProperty('--text-color', '#0B0B0C');
+</script>
+"""
+
+# Aplicar tema al cargar
+st.markdown(THEME_CONFIG, unsafe_allow_html=True)
+
+# ──────────────────────────────────────────────────────────────
 # BRAND TOKENS
 # ──────────────────────────────────────────────────────────────
 RED    = "#DA291C"
