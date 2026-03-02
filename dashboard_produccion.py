@@ -1,17 +1,18 @@
-
 """
-PRONACA | Dashboard Producción Avícola (Zootecnia + Costos de Alimento)
-========================================================================
-Ejecutar:  streamlit run dashboard_produccion_costos_v5.py
+PRONACA | Dashboard Producción Avícola (Costos + Ideal vs Real)
+==============================================================
+Ejecutar:
+    streamlit run dashboard_produccion_costos_v8.py
 
-Requiere (en la MISMA carpeta):
-- produccion_actual_final_con_costos_alimento_v3.xlsx   (recomendado)
-  o cualquier .xlsx equivalente que incluya:
-  CostoAlimentoAcum, CostoAlimentoPorAveAcum, CostoAlimentoDia, ...
+Requiere en la MISMA carpeta:
+- produccion_actual_final_con_costos_alimento_v3.xlsx
+- 20_MEJORES_LOTES_POR_CONVERSION.xlsx   (opcional; si falta, usa ideal interno por segmento)
 
-Notas:
-- Este dashboard solo construye la MITAD IZQUIERDA (3 secciones).
-- La MITAD DERECHA queda en blanco (placeholder) como pediste.
+Notas clave:
+- Sección 02 ignora INICIO (<=14 días) y analiza desde día 15.
+- Sección 02 muestra SOLO botones y SOLO lotes con problemas.
+- Sección 03: Real vs Ideal (sin curva biológica) + gap $/kg y pérdida estimada.
+- Fix: usa textwrap.dedent para que Streamlit NO muestre el HTML como texto.
 """
 
 import os
@@ -20,18 +21,28 @@ import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 from datetime import datetime
+from textwrap import dedent
 
 # ──────────────────────────────────────────────────────────────
-#  PAGE CONFIG
+# CONFIG
+# ──────────────────────────────────────────────────────────────
+MAIN_FILE  = "produccion_actual_final_con_costos_alimento_v3.xlsx"
+BENCH_FILE = "20_MEJORES_LOTES_POR_CONVERSION.xlsx"
+
+EDAD_CORTE = 14
+EDAD_MIN_ANALISIS = 15
+
+# ──────────────────────────────────────────────────────────────
+# PAGE
 # ──────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="PRONACA | Producción Avícola",
+    page_title="PRONACA | Producción Avícola (Costos)",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
 
 # ──────────────────────────────────────────────────────────────
-#  BRAND TOKENS
+# BRAND TOKENS
 # ──────────────────────────────────────────────────────────────
 RED    = "#DA291C"
 BLACK  = "#0B0B0C"
@@ -52,30 +63,14 @@ ETAPA_COLORS = {
     "ACABADO (36+)":       "#DA291C",
 }
 
-# Curva biológica base (S = mixto)
-CURVA_S = {
-    1:0.173, 2:0.192, 3:0.212, 4:0.233, 5:0.255, 6:0.278, 7:0.302,
-    8:0.337, 9:0.374,10:0.412,11:0.453,12:0.496,13:0.541,14:0.590,
-   15:0.657,16:0.727,17:0.800,18:0.878,19:0.958,20:1.042,21:1.129,
-   22:1.219,23:1.312,24:1.407,25:1.505,26:1.605,27:1.707,28:1.811,
-   29:1.917,30:2.025,31:2.134,32:2.244,33:2.354,34:2.467,35:2.580,
-   36:2.692,37:2.806,38:2.920,39:3.033,40:3.147,41:3.259,42:3.373,
-   43:3.486,44:3.597,
-}
-CURVA_M = {k: round(v*1.075, 3) for k, v in CURVA_S.items()}
-CURVA_H = {k: round(v*0.955, 3) for k, v in CURVA_S.items()}
+# ──────────────────────────────────────────────────────────────
+# HELPERS
+# ──────────────────────────────────────────────────────────────
+def md(html: str):
+    """Render HTML en Streamlit sin que se vuelva 'code block' por indentación."""
+    st.markdown(dedent(html), unsafe_allow_html=True)
 
-def curva_bio(sexo, edad):
-    try:
-        e = int(edad)
-        sx = str(sexo).upper().strip()
-        if sx == "M": return CURVA_M.get(e, np.nan)
-        if sx == "H": return CURVA_H.get(e, np.nan)
-        return CURVA_S.get(e, np.nan)
-    except Exception:
-        return np.nan
-
-def get_etapa(edad):
+def get_etapa(edad: int):
     try:
         e = int(edad)
         if e <= 14: return "INICIO (1-14)"
@@ -85,31 +80,44 @@ def get_etapa(edad):
     except Exception:
         return "INICIO (1-14)"
 
-def tipo_granja(granja_id: str):
-    # BUC1xxx / STO2xxx = PROPIA | BUC3xxx / STO5xxx = PAC
-    try:
-        return "PROPIA" if str(granja_id)[3] in ("1", "2") else "PAC"
-    except Exception:
-        return "PROPIA"
-
-def zona_nombre(lote: str):
-    z = str(lote)[:3].upper()
-    if z == "BUC": return "BUCAY"           # 🔥 sin tilde, como pediste
-    if z == "STO": return "SANTO DOMINGO"
-    return "OTRA"
-
 def fmt_num(x, dec=2, prefix="", suffix=""):
     try:
-        if pd.isna(x): return "—"
-        if dec == 0: return f"{prefix}{int(round(float(x))):,}{suffix}"
-        return f"{prefix}{float(x):,.{dec}f}{suffix}"
+        if x is None or pd.isna(x):
+            return "—"
+        v = float(x)
+        if dec == 0:
+            return f"{prefix}{int(round(v)):,}{suffix}"
+        return f"{prefix}{v:,.{dec}f}{suffix}"
     except Exception:
         return "—"
 
+def parse_num_series(s: pd.Series) -> pd.Series:
+    """Convierte strings con coma decimal a float (ej: 0,115 -> 0.115; 1.234,56 -> 1234.56)."""
+    if pd.api.types.is_numeric_dtype(s):
+        return s
+    ss = s.astype(str).str.strip()
+    ss = ss.str.replace("\u00A0", "", regex=False).str.replace(" ", "", regex=False)
+    ss = ss.str.replace(r"[^0-9,\.\-]", "", regex=True)
+
+    has_dot = ss.str.contains(r"\.", regex=True)
+    has_comma = ss.str.contains(",", regex=False)
+    mask = has_dot & has_comma
+
+    ss.loc[mask] = ss.loc[mask].str.replace(".", "", regex=False).str.replace(",", ".", regex=False)
+    ss.loc[~mask] = ss.loc[~mask].str.replace(",", ".", regex=False)
+
+    return pd.to_numeric(ss, errors="coerce")
+
+def pick_first_col(df: pd.DataFrame, candidates: list[str]) -> str | None:
+    for c in candidates:
+        if c in df.columns:
+            return c
+    return None
+
 # ──────────────────────────────────────────────────────────────
-#  CSS — Pronaca industrial (se mantiene similar, más compacta)
+# CSS
 # ──────────────────────────────────────────────────────────────
-st.markdown(f"""
+md(f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Bebas+Neue&display=swap');
 
@@ -119,16 +127,18 @@ html, body, [data-testid="stAppViewContainer"], .stApp {{
     color: {TEXT} !important;
 }}
 .block-container {{
-    padding-top: 1.0rem !important;
-    padding-bottom: 1.8rem !important;
+    padding-top: 0.9rem !important;
+    padding-bottom: 1.2rem !important;
     max-width: 100% !important;
 }}
 footer {{ visibility: hidden; }}
-div[data-testid="stPlotlyChart"] {{
-    background:{CARD}; border:1px solid {BORDER}; border-radius:12px; padding:4px;
-}}
-div[data-testid="stDataFrame"] {{
-    background:{CARD}; border:1px solid {BORDER}; border-radius:10px; overflow:hidden;
+
+.card {{
+    background:{CARD};
+    border:1px solid {BORDER};
+    border-radius:14px;
+    padding:12px 14px;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.04);
 }}
 .pronaca-header {{
     background: {BLACK};
@@ -149,14 +159,11 @@ div[data-testid="stDataFrame"] {{
     border-radius: 999px; padding: 6px 14px;
     font-size: 0.85rem; color: rgba(255,255,255,0.75) !important; white-space: nowrap;
 }}
-/* Filter bar */
 .filter-bar {{
     background: {CARD}; border: 1px solid {BORDER};
     border-radius: 12px; padding: 10px 14px; margin-bottom: 10px;
     box-shadow: 0 1px 6px rgba(0,0,0,0.04);
 }}
-/* KPI chips */
-.kpi-row {{ display: flex; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }}
 .kpi-chip {{
     background: {CARD}; border: 1px solid {BORDER}; border-radius: 10px;
     padding: 10px 14px; min-width: 150px; flex: 1;
@@ -166,7 +173,7 @@ div[data-testid="stDataFrame"] {{
 .kv {{ font-size: 1.35rem; font-weight: 900; color: {TEXT}; line-height: 1; }}
 .kl {{ font-size: 0.70rem; font-weight: 800; text-transform: uppercase;
        letter-spacing: 0.8px; color: {MUTED} !important; margin-top: 3px; }}
-/* Section header */
+
 .sec-header {{
     display: flex; align-items: baseline; gap: 12px;
     padding: 8px 0 6px 0; margin: 4px 0 6px 0;
@@ -181,639 +188,605 @@ div[data-testid="stDataFrame"] {{
 }}
 .sec-sub {{ font-size: 0.78rem; color: {MUTED} !important; margin-top: 1px; }}
 
-/* Etapa inline table */
-.etapa-tbl {{ width:100%; border-collapse:collapse; font-size:0.80rem;
-              background:{CARD}; border:1px solid {BORDER}; border-radius:10px;
-              overflow:hidden; }}
-.etapa-tbl th {{
-    background:#F8FAFC; color:{MUTED} !important; font-size:0.68rem;
-    font-weight:900; text-transform:uppercase; letter-spacing:0.6px;
-    padding:7px 9px; border-bottom:1px solid {BORDER}; text-align:right;
+.badge {{
+    display:inline-block;
+    padding:2px 8px;
+    border-radius:999px;
+    font-size:0.72rem;
+    font-weight:900;
+    border:1px solid {BORDER};
+    background:#F8FAFC;
 }}
-.etapa-tbl th:first-child {{ text-align:left; }}
-.etapa-tbl td {{ padding:7px 9px; border-bottom:1px solid {BORDER};
-                 font-weight:600; text-align:right; color:{TEXT}; }}
-.etapa-tbl td:first-child {{ text-align:left; font-weight:900; }}
-.etapa-tbl tr:last-child td {{ border-bottom:none; font-weight:900;
-    background:#F8FAFC; border-top:2px solid {BORDER}; }}
-
+.badge.red {{ color:{RED}; border-color:rgba(218,41,28,.25); background:rgba(218,41,28,.06); }}
+.badge.amber {{ color:{AMBER}; border-color:rgba(217,119,6,.25); background:rgba(217,119,6,.07); }}
+.badge.green {{ color:{GREEN}; border-color:rgba(22,163,74,.25); background:rgba(22,163,74,.07); }}
 </style>
-""", unsafe_allow_html=True)
+""")
 
 # ──────────────────────────────────────────────────────────────
-#  DATA LOAD
+# DATA LOAD
 # ──────────────────────────────────────────────────────────────
-# Prioridad: el archivo "con costos"
-DEFAULT_FILE = "produccion_actual_final_con_costos_alimento_v3.xlsx"
-FALLBACKS = [
-    "produccion_actual_final_con_costos_alimento.xlsx",
-    "produccion_actual_final.xlsx",
-]
-ARCHIVO = DEFAULT_FILE if os.path.exists(DEFAULT_FILE) else next((f for f in FALLBACKS if os.path.exists(f)), None)
-
-if not ARCHIVO:
-    st.error("❌ No se encontró un archivo de producción en la carpeta.\n"
-             "Coloca **produccion_actual_final_con_costos_alimento_v3.xlsx** junto al dashboard.")
+if not os.path.exists(MAIN_FILE):
+    st.error(f"❌ No se encontró {MAIN_FILE} en la carpeta.")
     st.stop()
 
 @st.cache_data(show_spinner=False)
 def load_and_prepare(path: str) -> pd.DataFrame:
     df = pd.read_excel(path)
-    df.columns = df.columns.str.strip()
+    df.columns = df.columns.astype(str).str.strip()
 
-    # Convert numéricas comunes
-    num_cols = [
-        "Edad", "PesoFinal", "Peso", "Aves Neto", "AvesVivas", "EdadVenta",
-        "Kilos Neto", "MortalidadAcumulada", "UltimoReal7",
-        # costos (las que vemos en tu archivo v3)
-        "unit_cost_final", "CostoAlimentoDia", "CostoAlimentoAcum",
-        "CostoAlimentoPorAveDia", "CostoAlimentoPorAveAcum",
-    ]
-    for c in num_cols:
-        if c in df.columns:
-            df[c] = pd.to_numeric(df[c], errors="coerce")
+    # Detectar columnas principales (más robusto)
+    col_lote = pick_first_col(df, ["LoteCompleto", "Codigo_Unico", "Lote"])
+    if not col_lote:
+        raise ValueError("No encuentro columna de lote (LoteCompleto / Codigo_Unico / Lote).")
 
-    # Normalizar sexo
-    if "Sexo" in df.columns:
-        df["Sexo"] = (df["Sexo"].astype(str).str.upper().str.strip()
-                      .replace({"NAN":"S","NONE":"S","":"S"})
-                      .fillna("S"))
+    col_edad = pick_first_col(df, ["Edad", "edad", "X4=Edad"])
+    col_peso = pick_first_col(df, ["PesoFinal", "Peso", "Y=Peso comp", "Peso comp"])
+    col_aves = pick_first_col(df, ["AvesVivas", "Aves Vivas", "Aves_netas", "Aves Neto", "Aves Neto ", "Aves Neto"])
+    col_cost = pick_first_col(df, ["CostoAlimentoAcum", "Costo alim acum", "CostoAlimentoAcumulado", "CostoAlimento_acumulado"])
+    col_unit = pick_first_col(df, ["unit_cost_final", "unit_cost", "$/kg (real)", "Costo unitario"])
+    col_alimkg = pick_first_col(df, ["Alimento_acumulado_kg", "Alimento acum", "Alimento_acum", "AlimAcumKg"])
+
+    col_zona = pick_first_col(df, ["zona", "Zona"])
+    col_tipo = pick_first_col(df, ["TipoGranja", "Tipo_Granja", "Tipo de granja", "X30=Granja Propia"])
+    col_quint = pick_first_col(df, ["quintil", "Quintil_Area_Crianza", "Quintil"])
+    col_est = pick_first_col(df, ["Estatus", "ESTATUS", "Status"])
+
+    # Renombrar internamente
+    df = df.rename(columns={
+        col_lote: "LoteCompleto",
+        col_edad: "Edad",
+        col_peso: "PesoFinal",
+        col_aves: "AvesVivas",
+    })
+
+    # Parse numéricas
+    for c in ["Edad", "PesoFinal", "AvesVivas"]:
+        df[c] = parse_num_series(df[c])
+
+    # Estatus
+    if col_est:
+        df["Estatus"] = df[col_est].astype(str).str.upper().str.strip()
     else:
-        df["Sexo"] = "S"
+        df["Estatus"] = "ACTIVO"
 
-    # Campos derivados
-    df["ZonaNombre"] = df["LoteCompleto"].apply(zona_nombre) if "LoteCompleto" in df.columns else "OTRA"
-    df["GranjaID"]   = df["LoteCompleto"].astype(str).str[:7]
-    df["TipoGranja"] = df["GranjaID"].apply(tipo_granja)
+    # ZonaNombre
+    if col_zona:
+        z = parse_num_series(df[col_zona]).fillna(0).astype(int)
+        df["ZonaNombre"] = np.where(z == 1, "BUCAY", "SANTO DOMINGO")
+    else:
+        pref = df["LoteCompleto"].astype(str).str[:3].str.upper()
+        df["ZonaNombre"] = pref.map({"BUC":"BUCAY", "STO":"SANTO DOMINGO"}).fillna("OTRA")
+
+    # GranjaID
+    df["GranjaID"] = df["LoteCompleto"].astype(str).str[:7]
+
+    # TipoStd
+    if col_tipo:
+        # si viene como texto o dummy (1/0)
+        t = df[col_tipo]
+        if pd.api.types.is_numeric_dtype(t) or t.astype(str).str.fullmatch(r"[01]").fillna(False).any():
+            # si X30=Granja Propia: 1=PROPIA, 0=PAC
+            tt = parse_num_series(t).fillna(0).astype(int)
+            df["TipoStd"] = np.where(tt == 1, "PROPIA", "PAC")
+        else:
+            ts = t.astype(str).str.upper().str.strip()
+            df["TipoStd"] = np.where(ts.str.contains("PROPIA"), "PROPIA", "PAC")
+            df.loc[ts.eq("PCA"), "TipoStd"] = "PAC"
+    else:
+        # regla por código (como tu v5)
+        df["TipoStd"] = df["GranjaID"].apply(lambda g: "PROPIA" if str(g)[3] in ("1","2") else "PAC")
+
+    # Quintil
+    if col_quint:
+        df["Quintil"] = df[col_quint].astype(str).str.upper().str.strip()
+    else:
+        df["Quintil"] = "Q5"
+
+    # Etapa
+    df["Etapa"] = df["Edad"].apply(get_etapa)
+
+    # Costos / alimento
+    if col_cost:
+        df["CostoAcum"] = parse_num_series(df[col_cost])
+    else:
+        df["CostoAcum"] = np.nan
+
+    if col_alimkg:
+        df["AlimAcumKg"] = parse_num_series(df[col_alimkg])
+    else:
+        # si no hay alimento en kg, intentar derivar usando unit_cost_final
+        if col_unit and col_cost:
+            unit = parse_num_series(df[col_unit]).replace(0, np.nan)
+            df["AlimAcumKg"] = df["CostoAcum"] / unit
+        else:
+            df["AlimAcumKg"] = np.nan
+
+    # Kg live REAL (clave para que $/kg sea realista)
+    df["KgLive"] = (df["AvesVivas"] * df["PesoFinal"]).astype(float)
+
+    # $/kg acumulado (global)
+    df["CostoKg_Cum"] = df["CostoAcum"] / df["KgLive"].replace(0, np.nan)
+
+    # FCR acumulado (si hay alimento kg)
+    df["FCR_Cum"] = df["AlimAcumKg"] / df["KgLive"].replace(0, np.nan)
+
+    # Mortalidad %
+    col_mort_acum = pick_first_col(df, ["MortalidadAcumulada", "MORTALIDAD + DESCARTE"])
+    col_aves_neto = pick_first_col(df, ["Aves Neto", "Aves_netas"])
+    if col_mort_acum and col_aves_neto and col_mort_acum in df.columns and col_aves_neto in df.columns:
+        df[col_mort_acum] = parse_num_series(df[col_mort_acum])
+        df[col_aves_neto] = parse_num_series(df[col_aves_neto])
+        df["MortPct"] = (df[col_mort_acum] / df[col_aves_neto].replace(0, np.nan) * 100).round(2)
+    else:
+        df["MortPct"] = np.nan
+
+    # Orden y post15 (restar base a día 14)
+    df = df.sort_values(["LoteCompleto", "Edad"])
+    base14 = (df[df["Edad"] <= EDAD_CORTE]
+              .groupby("LoteCompleto", as_index=False)
+              .last()[["LoteCompleto", "KgLive", "AlimAcumKg", "CostoAcum"]]
+              .rename(columns={"KgLive":"KgBase14", "AlimAcumKg":"AlimBase14", "CostoAcum":"CostoBase14"}))
+
+    df = df.merge(base14, on="LoteCompleto", how="left")
+    df[["KgBase14","AlimBase14","CostoBase14"]] = df[["KgBase14","AlimBase14","CostoBase14"]].fillna(0)
+
+    df["KgPost15"]   = df["KgLive"] - df["KgBase14"]
+    df["AlimPost15"] = df["AlimAcumKg"] - df["AlimBase14"]
+    df["CostoPost15"]= df["CostoAcum"] - df["CostoBase14"]
+
+    df["FCR_Post15"]     = df["AlimPost15"] / df["KgPost15"].replace(0, np.nan)
+    df["CostoKg_Post15"] = df["CostoPost15"] / df["KgPost15"].replace(0, np.nan)
+
     return df
 
-with st.spinner("Cargando datos…"):
-    DF = load_and_prepare(ARCHIVO)
-
-# ──────────────────────────────────────────────────────────────
-#  SNAPSHOT ACTIVOS (último registro por lote)
-# ──────────────────────────────────────────────────────────────
 @st.cache_data(show_spinner=False)
-def build_activos_snap(_df: pd.DataFrame):
-    act = _df[_df["Estatus"].astype(str).str.upper().eq("ACTIVO")].copy()
+def build_snapshot_activos(df_all: pd.DataFrame) -> pd.DataFrame:
+    act = df_all[df_all["Estatus"].astype(str).str.upper().eq("ACTIVO")].copy()
+    if act.empty:
+        return pd.DataFrame()
+    snap = (act.sort_values(["LoteCompleto","Edad"])
+              .groupby("LoteCompleto", as_index=False)
+              .last())
+    snap["Etapa"] = snap["Edad"].apply(get_etapa)
+    return snap
 
-    # Promedio de PesoFinal de toda la flota activa por día (Edad)
-    prom_flota = act.groupby("Edad")["PesoFinal"].mean().round(4).to_dict()
+@st.cache_data(show_spinner=False)
+def build_segment_ideals(df_all: pd.DataFrame, top_n: int = 5):
+    """
+    IDEAL por segmento (Zona, Tipo, Quintil): usa top N lotes con menor FCR_Post15
+    en su último registro (Edad >= 15), y calcula curva promedio por edad.
+    """
+    act = df_all[df_all["Estatus"].astype(str).str.upper().eq("ACTIVO")].copy()
+    if act.empty:
+        act = df_all.copy()
 
-    # Snapshot: último registro por lote (por Edad)
-    snap = act.sort_values("Edad").groupby("LoteCompleto").last().reset_index()
+    snap = (act.sort_values(["LoteCompleto","Edad"])
+              .groupby("LoteCompleto", as_index=False)
+              .last())
 
-    snap["Etapa"]   = snap["Edad"].apply(get_etapa)
-    snap["MortPct"] = (snap["MortalidadAcumulada"] /
-                       snap["Aves Neto"].replace(0, np.nan) * 100).round(2)
+    snap = snap[snap["Edad"] >= EDAD_MIN_ANALISIS].copy()
+    snap = snap[snap["FCR_Post15"].notna()].copy()
+    ideals = {}
 
-    # Kg totales (live weight) y conversión vs flota en el día de pesaje
-    snap["KgTotales"] = (snap["PesoFinal"] * snap["AvesVivas"]).round(1)
+    if snap.empty:
+        return ideals
 
-    # Merge para PesoFinal en el día de medición (UltimoReal7)
-    dias_medicion = act[["LoteCompleto", "Edad", "PesoFinal"]].rename(columns={"Edad": "DiaMed", "PesoFinal": "PesoEnMed"})
-    dias_medicion["DiaMed"] = pd.to_numeric(dias_medicion["DiaMed"], errors="coerce").round().astype("Int64")
-    snap2 = snap.copy()
-    snap2["DiaMed"] = pd.to_numeric(snap2["UltimoReal7"], errors="coerce").round().astype("Int64")
+    for (zona, tipo, quint), g in snap.groupby(["ZonaNombre","TipoStd","Quintil"]):
+        g2 = g.sort_values("FCR_Post15", ascending=True).head(top_n)
+        lotes_top = g2["LoteCompleto"].tolist()
+        cur = act[act["LoteCompleto"].isin(lotes_top)].copy()
+        if cur.empty:
+            continue
 
-    merged = snap2.merge(
-        dias_medicion,
-        on=["LoteCompleto", "DiaMed"],
-        how="left"
-    )
-    merged["PromFlota"] = merged["DiaMed"].map(prom_flota)
-    merged["ConvPct"]   = ((merged["PesoEnMed"] / merged["PromFlota"].replace(0, np.nan) - 1) * 100).round(2)
+        agg = (cur.groupby("Edad", as_index=False)
+               .agg(PesoFinal=("PesoFinal","mean"),
+                    CostoKg_Post15=("CostoKg_Post15","mean")))
+        agg = agg.sort_values("Edad")
 
-    # Costos (si existen)
-    if "CostoAlimentoAcum" in merged.columns:
-        merged["CostoTotalAlim"] = merged["CostoAlimentoAcum"]
-    else:
-        merged["CostoTotalAlim"] = np.nan
+        ideals[(zona, tipo, quint)] = {
+            "edad": agg["Edad"].to_numpy(),
+            "peso": agg["PesoFinal"].to_numpy(),
+            "costkg_post15": agg["CostoKg_Post15"].to_numpy(),
+            "lotes_base": lotes_top,
+        }
+    return ideals
 
-    if "CostoAlimentoPorAveAcum" in merged.columns:
-        merged["CostoAveAlim"] = merged["CostoAlimentoPorAveAcum"]
-    else:
-        # fallback: costo total / aves
-        merged["CostoAveAlim"] = merged["CostoTotalAlim"] / merged["AvesVivas"].replace(0, np.nan)
+def interp_at_age(x_arr, y_arr, age):
+    try:
+        if x_arr is None or y_arr is None or len(x_arr) < 2:
+            return np.nan
+        age = float(age)
+        x = np.asarray(x_arr, dtype=float)
+        y = np.asarray(y_arr, dtype=float)
+        ok = np.isfinite(x) & np.isfinite(y)
+        x = x[ok]; y = y[ok]
+        if len(x) < 2:
+            return np.nan
+        if age <= x.min(): return float(y[x.argmin()])
+        if age >= x.max(): return float(y[x.argmax()])
+        return float(np.interp(age, x, y))
+    except Exception:
+        return np.nan
 
-    merged["CostoKgAlim"] = merged["CostoTotalAlim"] / merged["KgTotales"].replace(0, np.nan)
+with st.spinner("Cargando datos…"):
+    DF = load_and_prepare(MAIN_FILE)
 
-    return merged, prom_flota, act
+with st.spinner("Procesando snapshot e ideal…"):
+    SNAP = build_snapshot_activos(DF)
+    SEG_IDEALS = build_segment_ideals(DF, top_n=5)
 
-with st.spinner("Procesando métricas…"):
-    SNAP, PROM_FLOTA, DF_ACTIVOS = build_activos_snap(DF)
+if SNAP.empty:
+    st.warning("No hay lotes ACTIVO en el archivo (o el estatus no coincide).")
+    st.stop()
 
 # ──────────────────────────────────────────────────────────────
-#  HEADER
+# HEADER
 # ──────────────────────────────────────────────────────────────
 hoy = datetime.today()
-st.markdown(f"""
+md(f"""
 <div class="pronaca-header">
   <div style="font-size:2.2rem;line-height:1">🐔</div>
   <div>
     <div class="pronaca-header-title">PRONACA · PRODUCCIÓN AVÍCOLA</div>
-    <div class="pronaca-header-sub">Panel operativo: zootecnia + costos de alimento (lotes activos)</div>
+    <div class="pronaca-header-sub">Panel operativo basado en costos (FCR y $/kg) · Ideal vs Real</div>
   </div>
   <div class="pronaca-header-pill">📅 Corte {hoy:%d %b %Y}</div>
 </div>
-""", unsafe_allow_html=True)
+""")
 
 # ──────────────────────────────────────────────────────────────
-#  LAYOUT: 2 MITADES (IZQ con 3 secciones / DER vacío)
+# FILTROS FULL WIDTH
+# ──────────────────────────────────────────────────────────────
+md('<div class="filter-bar">')
+fc1, fc2, fc3 = st.columns([1.3, 1.2, 1.2])
+with fc1:
+    sel_zona = st.multiselect("📍 Zona", ["BUCAY","SANTO DOMINGO"], default=["BUCAY","SANTO DOMINGO"])
+with fc2:
+    sel_tipo = st.multiselect("🏠 Tipo", ["PROPIA","PAC"], default=["PROPIA","PAC"])
+with fc3:
+    sel_quint = st.multiselect("🧩 Quintil", ["Q1","Q2","Q3","Q4","Q5"], default=["Q1","Q2","Q3","Q4","Q5"])
+md("</div>")
+
+SF = SNAP.copy()
+SF = SF[SF["ZonaNombre"].isin(sel_zona)]
+SF = SF[SF["TipoStd"].isin(sel_tipo)]
+SF = SF[SF["Quintil"].isin(sel_quint)]
+
+if SF.empty:
+    st.info("Sin datos para los filtros seleccionados.")
+    st.stop()
+
+# ──────────────────────────────────────────────────────────────
+# KPIs FULL WIDTH (ARRIBA)
+# ──────────────────────────────────────────────────────────────
+SF15 = SF[SF["Edad"] >= EDAD_MIN_ANALISIS].copy()
+
+kg_live_total = SF["KgLive"].sum()
+costo_total = SF["CostoAcum"].sum()
+cost_per_kg = costo_total / (kg_live_total if kg_live_total else np.nan)
+
+# FCR ponderado desde 15
+fcr_post = (SF15["AlimPost15"].sum() / SF15["KgPost15"].sum()) if (SF15["KgPost15"].sum() > 0) else np.nan
+
+# Pérdida est vs ideal (post15) por lote
+def loss_row(r):
+    if r["Edad"] < EDAD_MIN_ANALISIS or pd.isna(r["CostoKg_Post15"]) or pd.isna(r["KgPost15"]) or r["KgPost15"] <= 0:
+        return (np.nan, np.nan, np.nan)
+    key = (r["ZonaNombre"], r["TipoStd"], r["Quintil"])
+    ideal = SEG_IDEALS.get(key)
+    if not ideal:
+        return (np.nan, np.nan, np.nan)
+    ideal_ck = interp_at_age(ideal["edad"], ideal["costkg_post15"], r["Edad"])
+    delta = r["CostoKg_Post15"] - ideal_ck if pd.notna(ideal_ck) else np.nan
+    loss = max(0.0, delta) * float(r["KgPost15"]) if pd.notna(delta) else np.nan
+    return (ideal_ck, delta, loss)
+
+if not SF15.empty:
+    tmp = SF15.apply(lambda r: loss_row(r), axis=1, result_type="expand")
+    tmp.columns = ["IdealCk", "DeltaCk", "Loss"]
+    SF15 = pd.concat([SF15.reset_index(drop=True), tmp.reset_index(drop=True)], axis=1)
+    loss_total = SF15["Loss"].sum(skipna=True)
+else:
+    loss_total = np.nan
+
+k1,k2,k3,k4,k5,k6 = st.columns(6)
+kpi = [
+    (k1, f"{SF['LoteCompleto'].nunique():,}", "Lotes activos", True, ""),
+    (k2, f"{int(SF['AvesVivas'].sum()):,}", "Aves vivas", True, ""),
+    (k3, fmt_num(kg_live_total,0,suffix=" kg"), "Kg live (total)", True, ""),
+    (k4, fmt_num(fcr_post,3), "FCR (desde día 15)", False, ""),
+    (k5, fmt_num(costo_total,0,prefix="$"), "Costo alim (acum)", True, ""),
+    (k6, fmt_num(loss_total,0,prefix="$"), "Pérdida est. vs ideal", False, f"color:{RED}!important;" if pd.notna(loss_total) and loss_total>0 else ""),
+]
+for col, val, lab, accent, extra_style in kpi:
+    with col:
+        st.markdown(
+            f'<div class="kpi-chip {"accent" if accent else ""}">'
+            f'<div class="kv" style="{extra_style}">{val}</div>'
+            f'<div class="kl">{lab}</div></div>',
+            unsafe_allow_html=True
+        )
+
+# ──────────────────────────────────────────────────────────────
+# LAYOUT: 2 MITADES
 # ──────────────────────────────────────────────────────────────
 left, right = st.columns([1, 1], gap="large")
 
+# ──────────────────────────────────────────────────────────────
+# SECCIÓN 01 — RESUMEN POR ETAPA
+# ──────────────────────────────────────────────────────────────
 with left:
+    md(f"""
+<div class="sec-header">
+  <span class="sec-num">01</span>
+  <div>
+    <div class="sec-title">Resumen por Etapa (Costos reales)</div>
+    <div class="sec-sub">Aves, Kg live, FCR y $/kg · (FCR desde día 15 en adelante)</div>
+  </div>
+</div>
+""")
+
+    rows = []
+    for etapa in ETAPA_ORDER:
+        g = SF[SF["Etapa"] == etapa].copy()
+        if g.empty:
+            continue
+
+        aves = g["AvesVivas"].sum()
+        kg   = g["KgLive"].sum()
+        cost = g["CostoAcum"].sum()
+        mort = g["MortPct"].mean()
+
+        if etapa == "INICIO (1-14)":
+            # acumulado completo
+            alim = g["AlimAcumKg"].sum()
+            fcr  = alim / kg if kg > 0 else np.nan
+            ck   = cost / kg if kg > 0 else np.nan
+        else:
+            g2 = g[g["Edad"] >= EDAD_MIN_ANALISIS]
+            kgp = g2["KgPost15"].sum()
+            alim = g2["AlimPost15"].sum()
+            cpost = g2["CostoPost15"].sum()
+            fcr  = alim / kgp if kgp > 0 else np.nan
+            ck   = cpost / kgp if kgp > 0 else np.nan
+
+        badge = "green"
+        if pd.notna(ck) and ck >= 0.9: badge = "red"
+        elif pd.notna(ck) and ck >= 0.75: badge = "amber"
+
+        rows.append((etapa, aves, kg, fcr, cost, ck, mort, badge))
+
+    tbody = ""
+    for etapa, aves, kg, fcr, cost, ck, mort, badge in rows:
+        dot = ETAPA_COLORS.get(etapa, BLUE)
+        tbody += f"""
+<tr style="border-bottom:1px solid {BORDER}">
+  <td style="text-align:left;padding:8px 10px;font-weight:900">
+    <span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:{dot};margin-right:6px;vertical-align:middle"></span>
+    {etapa}
+  </td>
+  <td style="text-align:right;padding:8px 10px">{int(aves):,}</td>
+  <td style="text-align:right;padding:8px 10px">{fmt_num(kg,0)}</td>
+  <td style="text-align:right;padding:8px 10px">{fmt_num(fcr,3)}</td>
+  <td style="text-align:right;padding:8px 10px">{fmt_num(cost,0,prefix="$")}</td>
+  <td style="text-align:right;padding:8px 10px"><span class="badge {badge}">{fmt_num(ck,3,prefix="$",suffix="/kg")}</span></td>
+  <td style="text-align:right;padding:8px 10px">{fmt_num(mort,2,suffix="%")}</td>
+</tr>
+"""
+
+    md(f"""
+<div class="card" style="padding:0;overflow:auto">
+  <table style="width:100%;border-collapse:collapse;font-size:0.82rem">
+    <thead>
+      <tr style="background:#F8FAFC;border-bottom:1px solid {BORDER}">
+        <th style="text-align:left;padding:8px 10px;color:{MUTED};font-size:0.70rem;text-transform:uppercase;letter-spacing:0.6px">Etapa</th>
+        <th style="text-align:right;padding:8px 10px;color:{MUTED};font-size:0.70rem;text-transform:uppercase;letter-spacing:0.6px">Aves</th>
+        <th style="text-align:right;padding:8px 10px;color:{MUTED};font-size:0.70rem;text-transform:uppercase;letter-spacing:0.6px">Kg live</th>
+        <th style="text-align:right;padding:8px 10px;color:{MUTED};font-size:0.70rem;text-transform:uppercase;letter-spacing:0.6px">FCR</th>
+        <th style="text-align:right;padding:8px 10px;color:{MUTED};font-size:0.70rem;text-transform:uppercase;letter-spacing:0.6px">Costo</th>
+        <th style="text-align:right;padding:8px 10px;color:{MUTED};font-size:0.70rem;text-transform:uppercase;letter-spacing:0.6px">$/kg</th>
+        <th style="text-align:right;padding:8px 10px;color:{MUTED};font-size:0.70rem;text-transform:uppercase;letter-spacing:0.6px">Mort%</th>
+      </tr>
+    </thead>
+    <tbody>{tbody}</tbody>
+  </table>
+</div>
+""")
+
     # ──────────────────────────────────────────────────────────
-    #  FILTROS (arriba)
+    # SECCIÓN 02 — PEOR CONVERSIÓN (DÍA 15+) SOLO BOTONES
     # ──────────────────────────────────────────────────────────
-    with st.container():
-        st.markdown('<div class="filter-bar">', unsafe_allow_html=True)
-        fc1, fc2, fc3 = st.columns([1.4, 1.4, 3.2])
-        with fc1:
-            sel_zona = st.multiselect(
-                "📍 Zona",
-                options=["BUCAY", "SANTO DOMINGO"],
-                default=["BUCAY", "SANTO DOMINGO"],
-                key="fz",
-            )
-        with fc2:
-            sel_tipo = st.multiselect(
-                "🏠 Tipo de granja",
-                options=["PROPIA", "PAC"],
-                default=["PROPIA", "PAC"],
-                key="ft",
-            )
-        with fc3:
-            st.markdown(
-                f"<div style='padding:10px 0 0 4px;font-size:0.78rem;color:{MUTED};'>"
-                "<b>Clasificación automática:</b> &nbsp;"
-                f"<span style='color:{TEXT}'>BUC1xxx / STO2xxx</span> = PROPIA &nbsp;·&nbsp; "
-                f"<span style='color:{TEXT}'>BUC3xxx / STO5xxx</span> = PAC</div>",
-                unsafe_allow_html=True,
-            )
-        st.markdown("</div>", unsafe_allow_html=True)
+    md(f"""
+<div class="sec-header">
+  <span class="sec-num">02</span>
+  <div>
+    <div class="sec-title">Peores conversiones (desde día 15) · Solo lotes con problemas</div>
+    <div class="sec-sub">Ranking por pérdida estimada vs ideal (Δ $/kg y $) · Click y se grafica en la 03 automáticamente</div>
+  </div>
+</div>
+""")
 
-    # ── Aplicar filtros ───────────────────────────────────────
-    SF = SNAP.copy()
-    if sel_zona:
-        SF = SF[SF["ZonaNombre"].isin(sel_zona)]
-    if sel_tipo:
-        SF = SF[SF["TipoGranja"].isin(sel_tipo)]
-
-    DF_ACT_F = DF_ACTIVOS.copy()
-    if sel_zona:
-        DF_ACT_F = DF_ACT_F[DF_ACT_F["ZonaNombre"].isin(sel_zona)]
-    if sel_tipo:
-        DF_ACT_F = DF_ACT_F[DF_ACT_F["TipoGranja"].isin(sel_tipo)]
-
-    # ──────────────────────────────────────────────────────────
-    #  KPIs (SIEMPRE arriba y DINÁMICOS por filtros)
-    # ──────────────────────────────────────────────────────────
-    n_lotes = int(SF["LoteCompleto"].nunique()) if not SF.empty else 0
-    n_aves  = int(SF["AvesVivas"].sum()) if not SF.empty else 0
-    kg_tot  = float(SF["KgTotales"].sum()) if not SF.empty else 0.0
-    mort_p  = float(SF["MortPct"].mean()) if not SF.empty else np.nan
-
-    cost_tot = float(SF["CostoTotalAlim"].sum()) if ("CostoTotalAlim" in SF.columns and not SF.empty) else np.nan
-    # $/kg: ponderado (total cost / total kg)
-    cost_per_kg = (cost_tot / kg_tot) if (pd.notna(cost_tot) and kg_tot > 0) else np.nan
-
-    # Lotes críticos: vs flota < -5%
-    n_crit = int((SF["ConvPct"] < -5).sum()) if ("ConvPct" in SF.columns and not SF.empty) else 0
-
-    k1,k2,k3,k4,k5,k6 = st.columns(6)
-    kpi_data = [
-        (k1, f"{n_lotes:,}", "Lotes activos", True, ""),
-        (k2, f"{n_aves:,}", "Aves vivas", True, ""),
-        (k3, fmt_num(kg_tot, 0, suffix=" kg"), "Kg totales", True, ""),
-        (k4, fmt_num(mort_p, 2, suffix="%"), "Mortalidad prom.", False, f"color:{RED}!important;" if pd.notna(mort_p) and mort_p>=5 else ""),
-        (k5, fmt_num(cost_tot, 0, prefix="$"), "Costo alimento (acum)", True, ""),
-        (k6, fmt_num(cost_per_kg, 3, prefix="$", suffix="/kg"), "Costo $/kg (prom)", True, ""),
-    ]
-    for col, val, lab, accent, extra_style in kpi_data:
-        with col:
-            st.markdown(
-                f'<div class="kpi-chip {"accent" if accent else ""}">'
-                f'<div class="kv" style="{extra_style}">{val}</div>'
-                f'<div class="kl">{lab}</div></div>',
-                unsafe_allow_html=True,
-            )
-
-    if SF.empty:
-        st.info("Sin datos para los filtros seleccionados.")
-        st.stop()
-
-    # ══════════════════════════════════════════════════════════
-    #  SECCIÓN 01 — ETAPAS (gráfico pequeño + TABLA grande)
-    # ══════════════════════════════════════════════════════════
-    st.markdown("""
-    <div class="sec-header">
-      <span class="sec-num">01</span>
-      <div>
-        <div class="sec-title">Datos por Etapa de Crecimiento</div>
-        <div class="sec-sub">Gráfico pequeño = aves vivas · Tabla = métricas + costo por etapa</div>
-      </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    etapa_agg = (SF.groupby("Etapa", as_index=False)
-        .agg(
-            Unidades    = ("AvesVivas",  "sum"),
-            KgTotales   = ("KgTotales", "sum"),
-            KgXUnidad   = ("PesoFinal", "mean"),
-            MortPct     = ("MortPct",   "mean"),
-            CostoTotal  = ("CostoTotalAlim", "sum"),
-        )
-    )
-    etapa_agg["CostoKg"] = etapa_agg["CostoTotal"] / etapa_agg["KgTotales"].replace(0, np.nan)
-    etapa_agg["_ord"] = etapa_agg["Etapa"].map({e:i for i,e in enumerate(ETAPA_ORDER)})
-    etapa_agg = etapa_agg.sort_values("_ord").reset_index(drop=True)
-
-    c_chart, c_table = st.columns([1.0, 1.8], gap="medium")
-
-    with c_chart:
-        # ── mini chart (pequeño) ──
-        fig1 = go.Figure()
-        fig1.add_trace(go.Bar(
-            x=etapa_agg["Etapa"],
-            y=etapa_agg["Unidades"],
-            marker=dict(color=[ETAPA_COLORS.get(e, BLUE) for e in etapa_agg["Etapa"]], cornerradius=4),
-            hovertemplate="<b>%{x}</b><br>Aves vivas: %{y:,}<extra></extra>",
-            showlegend=False,
-        ))
-        fig1.update_layout(
-            template="plotly_white",
-            paper_bgcolor=CARD, plot_bgcolor=CARD,
-            height=150, margin=dict(l=6, r=6, t=10, b=10),
-            font=dict(family="DM Sans", size=12, color=TEXT),
-            xaxis=dict(title="", tickangle=-20, gridcolor=BORDER, color=TEXT),
-            yaxis=dict(title="Aves", gridcolor=BORDER, color=TEXT),
-        )
-        st.plotly_chart(fig1, use_container_width=True)
-
-    with c_table:
-        # ── tabla principal (con costo por etapa) ──
-        tbody = ""
-        for _, r in etapa_agg.iterrows():
-            dot = ETAPA_COLORS.get(r["Etapa"], BLUE)
-            mc  = f"color:{RED};font-weight:900" if r["MortPct"]>=5 else \
-                  (f"color:{AMBER};font-weight:800" if r["MortPct"]>=3 else
-                   f"color:{GREEN};font-weight:700")
-            tbody += f"""<tr>
-              <td><span style="display:inline-block;width:9px;height:9px;
-                  border-radius:2px;background:{dot};margin-right:6px;
-                  vertical-align:middle"></span>
-                  {r['Etapa']}</td>
-              <td>{int(r['Unidades']):,}</td>
-              <td>{r['KgTotales']:,.0f}</td>
-              <td>{r['KgXUnidad']:.3f}</td>
-              <td style="{mc}">{r['MortPct']:.2f}%</td>
-              <td>{fmt_num(r['CostoTotal'], 0, prefix='$')}</td>
-              <td>{fmt_num(r['CostoKg'], 3, prefix='$', suffix='/kg')}</td>
-            </tr>"""
-
-        # Totales
-        tot_u = int(etapa_agg["Unidades"].sum())
-        tot_k = float(etapa_agg["KgTotales"].sum())
-        tot_c = float(etapa_agg["CostoTotal"].sum())
-        avg_ku = float(etapa_agg["KgXUnidad"].mean())
-        avg_m  = float(etapa_agg["MortPct"].mean())
-        avg_ck = (tot_c / tot_k) if tot_k>0 else np.nan
-        mc_t   = f"color:{RED}" if avg_m>=5 else (f"color:{AMBER}" if avg_m>=3 else f"color:{GREEN}")
-        tbody += f"""<tr>
-          <td>TOTAL</td>
-          <td>{tot_u:,}</td>
-          <td>{tot_k:,.0f}</td>
-          <td>{avg_ku:.3f}</td>
-          <td style="{mc_t};font-weight:900">{avg_m:.2f}%</td>
-          <td>{fmt_num(tot_c, 0, prefix='$')}</td>
-          <td>{fmt_num(avg_ck, 3, prefix='$', suffix='/kg')}</td>
-        </tr>"""
-
-        st.markdown(f"""
-        <div style="overflow-x:auto">
-        <table class="etapa-tbl">
-          <thead><tr>
-            <th style="text-align:left">Etapa</th>
-            <th>Unidades</th><th>Kg totales</th><th>Kg/unid</th><th>Mort%</th>
-            <th>Costo ($)</th><th>$/kg</th>
-          </tr></thead>
-          <tbody>{tbody}</tbody>
-        </table></div>
-        """, unsafe_allow_html=True)
-
-    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
-
-    # ══════════════════════════════════════════════════════════
-    #  SECCIÓN 02 — TOP 10 peores conversiones (compacto + selector)
-    # ══════════════════════════════════════════════════════════
-    st.markdown("""
-    <div class="sec-header">
-      <span class="sec-num">02</span>
-      <div>
-        <div class="sec-title">Top 10 Granjas con Peor Conversión</div>
-        <div class="sec-sub">Conversión = % desviación del peso real vs promedio de flota en el mismo día de pesaje. Incluye costo acumulado.</div>
-      </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    SF_CONV = SF[SF["ConvPct"].notna()].copy()
-    if SF_CONV.empty:
-        st.info("Sin datos de conversión (ConvPct) con los filtros actuales.")
+    if SF15.empty:
+        st.info("No hay lotes con Edad ≥ 15 con los filtros actuales.")
     else:
-        granja_top = (SF_CONV.groupby("GranjaID", as_index=False)
-            .agg(
-                Zona      = ("ZonaNombre",   "first"),
-                Tipo      = ("TipoGranja",   "first"),
-                Lotes     = ("LoteCompleto", "nunique"),
-                AvesVivas = ("AvesVivas",    "sum"),
-                KgTot     = ("KgTotales",    "sum"),
-                MortPct   = ("MortPct",      "mean"),
-                ConvPct   = ("ConvPct",      "mean"),
-                CostoTot  = ("CostoTotalAlim","sum"),
-            )
-            .sort_values("ConvPct")
-            .head(10)
-            .reset_index(drop=True)
-        )
-        granja_top["CostoKg"] = granja_top["CostoTot"] / granja_top["KgTot"].replace(0, np.nan)
+        sf_ok = SF15[SF15["Loss"].notna()].copy()
+        if sf_ok.empty:
+            st.warning("No se pudo calcular ideal/pérdida para este segmento (no hay base suficiente de ideal interno).")
+        else:
+            granja_rank = (sf_ok.groupby("GranjaID", as_index=False)
+                           .agg(
+                               Zona=("ZonaNombre","first"),
+                               Tipo=("TipoStd","first"),
+                               Quintil=("Quintil","first"),
+                               Lotes=("LoteCompleto","nunique"),
+                               LossTotal=("Loss","sum"),
+                               DeltaCkProm=("DeltaCk","mean"),
+                           )
+                           .sort_values("LossTotal", ascending=False)
+                           .head(10)
+                           .reset_index(drop=True))
 
-        # ── Chart tornado ──
-        fig2 = go.Figure(go.Bar(
-            y=granja_top["GranjaID"],
-            x=granja_top["ConvPct"],
-            orientation="h",
-            marker=dict(color=[RED if v < -5 else (AMBER if v < 0 else MUTED) for v in granja_top["ConvPct"]],
-                        cornerradius=4),
-            text=[f"{v:+.1f}%" for v in granja_top["ConvPct"]],
-            textposition="outside",
-            hovertemplate="<b>%{y}</b><br>vs flota: %{x:+.2f}%<extra></extra>",
-            showlegend=False
-        ))
-        fig2.add_vline(x=0, line_color=MUTED, line_width=1.5, line_dash="dash")
-        fig2.update_layout(
-            template="plotly_white",
-            paper_bgcolor=CARD, plot_bgcolor=CARD,
-            height=260, margin=dict(l=6, r=60, t=10, b=10),
-            font=dict(family="DM Sans", size=12, color=TEXT),
-            xaxis=dict(title="Desviación % vs promedio de flota",
-                       gridcolor=BORDER, zeroline=False, tickformat="+.1f", ticksuffix="%", color=TEXT),
-            yaxis=dict(gridcolor=BORDER, zeroline=False, autorange="reversed", color=TEXT),
-        )
-        st.plotly_chart(fig2, use_container_width=True)
+            with st.expander("📌 Top 10 granjas (click para seleccionar)", expanded=True):
+                cols = st.columns(2)
+                for i, row in granja_rank.iterrows():
+                    label = f"{row['GranjaID']} · {fmt_num(row['LossTotal'],0,prefix='$')} · Δ$/kg {fmt_num(row['DeltaCkProm'],3,prefix='$')}"
+                    if cols[i % 2].button(label, key=f"farm_{row['GranjaID']}"):
+                        st.session_state["farm_sel"] = row["GranjaID"]
+                        st.rerun()
 
-        # ── Selector compacto ──
-        st.markdown(f"<div style='font-size:0.78rem;color:{MUTED};font-weight:800;"
-                    f"text-transform:uppercase;letter-spacing:0.6px;margin:6px 0 4px'>"
-                    f"Selecciona una granja (Top 10) para ver lotes + costos</div>", unsafe_allow_html=True)
+            farm_sel = st.session_state.get("farm_sel", granja_rank.iloc[0]["GranjaID"])
+            if farm_sel not in granja_rank["GranjaID"].tolist():
+                farm_sel = granja_rank.iloc[0]["GranjaID"]
 
-        granja_sel = st.selectbox(
-            "Granja",
-            granja_top["GranjaID"].tolist(),
-            index=0,
-            key="granja_sel",
-        )
-        g_row = granja_top[granja_top["GranjaID"] == granja_sel].iloc[0]
+            lotes_prob = sf_ok[sf_ok["GranjaID"] == farm_sel].copy()
+            lotes_prob = lotes_prob[(lotes_prob["Loss"] > 0) | (lotes_prob["DeltaCk"] > 0)]
+            lotes_prob = lotes_prob.sort_values("Loss", ascending=False)
 
-        # KPIs granja seleccionada
-        g1,g2,g3,g4,g5,g6 = st.columns(6)
-        with g1: st.markdown(f'<div class="kpi-chip"><div class="kv">{int(g_row["Lotes"])}</div><div class="kl">Lotes</div></div>', unsafe_allow_html=True)
-        with g2: st.markdown(f'<div class="kpi-chip"><div class="kv">{int(g_row["AvesVivas"]):,}</div><div class="kl">Aves vivas</div></div>', unsafe_allow_html=True)
-        with g3:
-            cc = RED if g_row["ConvPct"] < -5 else (AMBER if g_row["ConvPct"] < 0 else GREEN)
-            st.markdown(f'<div class="kpi-chip"><div class="kv" style="color:{cc}">{g_row["ConvPct"]:+.1f}%</div><div class="kl">vs flota</div></div>', unsafe_allow_html=True)
-        with g4:
-            mc = RED if g_row["MortPct"] >= 5 else (AMBER if g_row["MortPct"] >= 3 else GREEN)
-            st.markdown(f'<div class="kpi-chip"><div class="kv" style="color:{mc}">{g_row["MortPct"]:.2f}%</div><div class="kl">Mort.</div></div>', unsafe_allow_html=True)
-        with g5:
-            st.markdown(f'<div class="kpi-chip"><div class="kv">{fmt_num(g_row["CostoTot"],0,prefix="$")}</div><div class="kl">Costo acum</div></div>', unsafe_allow_html=True)
-        with g6:
-            st.markdown(f'<div class="kpi-chip"><div class="kv">{fmt_num(g_row["CostoKg"],3,prefix="$",suffix="/kg")}</div><div class="kl">Costo $/kg</div></div>', unsafe_allow_html=True)
+            if lotes_prob.empty:
+                st.info("Esta granja no tiene lotes con pérdida positiva vs ideal (para estos filtros).")
+            else:
+                st.caption(f"Lotes con problemas en {farm_sel} (Top {min(10,len(lotes_prob))})")
+                cols = st.columns(2)
+                for i, r in lotes_prob.head(10).iterrows():
+                    lab = f"{r['LoteCompleto']} · Δ$/kg {fmt_num(r['DeltaCk'],3,prefix='$')} · {fmt_num(r['Loss'],0,prefix='$')}"
+                    if cols[i % 2].button(lab, key=f"lot_{r['LoteCompleto']}"):
+                        st.session_state["lote_sel"] = r["LoteCompleto"]
+                        st.rerun()
 
-        # Tabla de lotes (con costos)
-        lotes_granja = SF[SF["GranjaID"] == granja_sel].copy().sort_values(["ConvPct","CostoKgAlim"], ascending=[True, False])
-        lotes_granja["CostoKgAlim"] = lotes_granja["CostoTotalAlim"] / lotes_granja["KgTotales"].replace(0, np.nan)
+                if len(lotes_prob) > 10:
+                    with st.expander("Ver más lotes con problemas"):
+                        cols2 = st.columns(2)
+                        for j, r in lotes_prob.iloc[10:].iterrows():
+                            lab = f"{r['LoteCompleto']} · Δ$/kg {fmt_num(r['DeltaCk'],3,prefix='$')} · {fmt_num(r['Loss'],0,prefix='$')}"
+                            if cols2[j % 2].button(lab, key=f"lot_more_{r['LoteCompleto']}"):
+                                st.session_state["lote_sel"] = r["LoteCompleto"]
+                                st.rerun()
 
-        cols_show = ["LoteCompleto","Sexo","Edad","Etapa","PesoFinal","KgTotales",
-                     "MortPct","ConvPct","AvesVivas","CostoTotalAlim","CostoAveAlim","CostoKgAlim"]
-        cols_show = [c for c in cols_show if c in lotes_granja.columns]
-
-        df_show = lotes_granja[cols_show].copy()
-        df_show = df_show.rename(columns={
-            "LoteCompleto":"Lote",
-            "PesoFinal":"Kg/unid",
-            "KgTotales":"Kg totales",
-            "MortPct":"Mort %",
-            "ConvPct":"vs flota %",
-            "AvesVivas":"Aves vivas",
-            "CostoTotalAlim":"Costo $ (acum)",
-            "CostoAveAlim":"$/ave (acum)",
-            "CostoKgAlim":"$/kg (acum)",
-        })
-        # Formatos
-        for c in ["Kg/unid","$/ave (acum)","$/kg (acum)"]:
-            if c in df_show.columns:
-                df_show[c] = pd.to_numeric(df_show[c], errors="coerce").round(3)
-        for c in ["Kg totales","Costo $ (acum)"]:
-            if c in df_show.columns:
-                df_show[c] = pd.to_numeric(df_show[c], errors="coerce").round(0)
-        for c in ["Mort %","vs flota %"]:
-            if c in df_show.columns:
-                df_show[c] = pd.to_numeric(df_show[c], errors="coerce").round(2)
-
-        st.dataframe(df_show, use_container_width=True, hide_index=True, height=220)
-
-        # Botón: enviar lote crítico a la sección 03
-        if not lotes_granja.empty:
-            peor_lote = lotes_granja.sort_values("ConvPct").iloc[0]["LoteCompleto"]
-            if st.button(f"📈 Ver curva del lote más crítico: {peor_lote}", key="btn_peor", type="primary"):
-                st.session_state["lote_curva"] = peor_lote
-                st.rerun()
-
-    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
-
-    # ══════════════════════════════════════════════════════════
-    #  SECCIÓN 03 — CURVA por LOTE + COSTO (más valor)
-    # ══════════════════════════════════════════════════════════
-    st.markdown("""
-    <div class="sec-header">
-      <span class="sec-num">03</span>
-      <div>
-        <div class="sec-title">Curva de Crecimiento + Costos por Lote</div>
-        <div class="sec-sub">Peso por edad vs curva biológica · Costo acumulado (total / ave / kg) hasta el día actual</div>
-      </div>
-    </div>
-    """, unsafe_allow_html=True)
+    # ──────────────────────────────────────────────────────────
+    # SECCIÓN 03 — REAL vs IDEAL (SIN BIO) + GAP COSTO
+    # ──────────────────────────────────────────────────────────
+    md(f"""
+<div class="sec-header">
+  <span class="sec-num">03</span>
+  <div>
+    <div class="sec-title">REAL vs IDEAL + GAP en Costos</div>
+    <div class="sec-sub">Sin curva biológica · solo comparación directa y pérdida estimada</div>
+  </div>
+</div>
+""")
 
     lotes_disp = sorted(SF["LoteCompleto"].unique().tolist())
-    default_lote = st.session_state.get("lote_curva", lotes_disp[0] if lotes_disp else None)
-    if default_lote not in lotes_disp and lotes_disp:
-        default_lote = lotes_disp[0]
-
-    csel1, csel2 = st.columns([1.2, 1.8])
-    with csel1:
-        buscar_txt = st.text_input("🔍 Buscar lote", placeholder="Ej: BUC3018-2504-02-S", key="s3_buscar")
-        lotes_f = [l for l in lotes_disp if buscar_txt.upper() in l.upper()] if buscar_txt else lotes_disp
-        if not lotes_f:
-            lotes_f = lotes_disp
-        lote_sel = st.selectbox("Lote a analizar", lotes_f, index=lotes_f.index(default_lote) if default_lote in lotes_f else 0, key="s3_lote")
-        st.session_state["lote_curva"] = lote_sel
-
-    info = SF[SF["LoteCompleto"] == lote_sel]
-    if info.empty:
-        st.warning("No hay snapshot para el lote seleccionado.")
+    if not lotes_disp:
         st.stop()
-    il = info.iloc[0]
 
-    # KPIs de cabecera del lote (incluye costos con más sentido)
-    # - Costo total alimento (USD)
-    # - Costo/ave (USD/ave)
-    # - Costo/kg (USD/kg)
-    # - Costo alimento día (USD/día) si existe en DF (último valor del lote)
-    lote_hist = DF_ACT_F[DF_ACT_F["LoteCompleto"] == lote_sel].sort_values("Edad")
-    cost_dia = float(lote_hist["CostoAlimentoDia"].dropna().iloc[-1]) if ("CostoAlimentoDia" in lote_hist.columns and not lote_hist["CostoAlimentoDia"].dropna().empty) else np.nan
+    default_lote = st.session_state.get("lote_sel", lotes_disp[0])
+    if default_lote not in lotes_disp:
+        default_lote = lotes_disp[0]
+        st.session_state["lote_sel"] = default_lote
 
-    h1,h2,h3,h4,h5,h6 = st.columns(6)
-    with h1: st.markdown(f'<div class="kpi-chip"><div class="kv">{il["GranjaID"]}</div><div class="kl">Granja</div></div>', unsafe_allow_html=True)
-    with h2: st.markdown(f'<div class="kpi-chip"><div class="kv">{int(il["Edad"])} días</div><div class="kl">Edad actual</div></div>', unsafe_allow_html=True)
-    with h3:
-        cc = RED if il.get("ConvPct", 0) < -5 else (AMBER if il.get("ConvPct", 0) < 0 else GREEN)
-        st.markdown(f'<div class="kpi-chip"><div class="kv" style="color:{cc}">{fmt_num(il.get("ConvPct",np.nan),1,suffix="%")}</div><div class="kl">vs flota</div></div>', unsafe_allow_html=True)
-    with h4: st.markdown(f'<div class="kpi-chip"><div class="kv">{fmt_num(il["CostoTotalAlim"],0,prefix="$")}</div><div class="kl">Costo total alim</div></div>', unsafe_allow_html=True)
-    with h5: st.markdown(f'<div class="kpi-chip"><div class="kv">{fmt_num(il["CostoAveAlim"],3,prefix="$",suffix="/ave")}</div><div class="kl">Costo por ave</div></div>', unsafe_allow_html=True)
-    with h6: st.markdown(f'<div class="kpi-chip"><div class="kv">{fmt_num(il["CostoKgAlim"],3,prefix="$",suffix="/kg")}</div><div class="kl">Costo por kg</div></div>', unsafe_allow_html=True)
+    # Buscar lote SOLO si quieres (como pediste)
+    with st.expander("🔎 Buscar lote específico (solo si necesitas)", expanded=False):
+        q = st.text_input("Buscar", value="", placeholder="Ej: BUC1002-2505A-06-M")
+        lotes_filtered = [x for x in lotes_disp if q.upper() in x.upper()] if q else lotes_disp
+        lote_pick = st.selectbox("Lote", lotes_filtered, index=lotes_filtered.index(default_lote) if default_lote in lotes_filtered else 0)
+        if lote_pick != default_lote:
+            st.session_state["lote_sel"] = lote_pick
+            st.rerun()
 
-    # ── Datos para curva ──
-    sexo_lote = lote_hist["Sexo"].iloc[0] if not lote_hist.empty else "S"
-    edades_l  = lote_hist["Edad"].astype(int).tolist()
-    pesos_l   = lote_hist["PesoFinal"].tolist()
-    bio_y     = [curva_bio(sexo_lote, e) for e in edades_l]
+    lote_sel = st.session_state.get("lote_sel", default_lote)
 
-    # Mejor lote referencia (mejor ConvPct) con al menos 7 días
-    lotes_cnt = DF_ACT_F.groupby("LoteCompleto")["Edad"].count()
-    lotes_ok  = lotes_cnt[lotes_cnt >= 7].index
-    snap_ref  = SF[SF["LoteCompleto"].isin(lotes_ok) & SF["ConvPct"].notna()]
-    if not snap_ref.empty:
-        snap_ref_sorted = snap_ref.sort_values("ConvPct", ascending=False)
-        mejor_id = snap_ref_sorted.iloc[0]["LoteCompleto"]
-        if mejor_id == lote_sel and len(snap_ref_sorted) > 1:
-            mejor_id = snap_ref_sorted.iloc[1]["LoteCompleto"]
-        mejor_data   = DF_ACT_F[DF_ACT_F["LoteCompleto"] == mejor_id].sort_values("Edad")
-        mejor_conv_v = float(snap_ref[snap_ref["LoteCompleto"] == mejor_id]["ConvPct"].iloc[0])
+    il = SF[SF["LoteCompleto"] == lote_sel].iloc[0]
+    key_seg = (il["ZonaNombre"], il["TipoStd"], il["Quintil"])
+    ideal_seg = SEG_IDEALS.get(key_seg)
+
+    hist = DF[DF["LoteCompleto"] == lote_sel].sort_values("Edad").copy()
+    if hist.empty:
+        st.warning("No hay historial del lote seleccionado.")
+        st.stop()
+
+    edad_act = float(il["Edad"])
+    peso_act = float(il["PesoFinal"])
+
+    # elegir costo $/kg para comparación (post15 si aplica)
+    ck_act = float(il["CostoKg_Post15"]) if (il["Edad"] >= EDAD_MIN_ANALISIS and pd.notna(il["CostoKg_Post15"])) else float(il["CostoKg_Cum"])
+    kg_post = float(il["KgPost15"]) if (il["Edad"] >= EDAD_MIN_ANALISIS and pd.notna(il["KgPost15"])) else np.nan
+
+    if not ideal_seg:
+        st.warning("⚠️ No hay IDEAL interno para esta combinación (Zona/Tipo/Quintil).")
     else:
-        mejor_id, mejor_data, mejor_conv_v = None, pd.DataFrame(), 0.0
+        ideal_peso = interp_at_age(ideal_seg["edad"], ideal_seg["peso"], edad_act)
+        ideal_ck   = interp_at_age(ideal_seg["edad"], ideal_seg["costkg_post15"], edad_act)
 
-    # ── FIGURA: peso vs edad ──
-    figA = go.Figure()
+        delta_ck = ck_act - ideal_ck if pd.notna(ideal_ck) else np.nan
+        loss_est = (max(0.0, delta_ck) * kg_post) if (pd.notna(delta_ck) and pd.notna(kg_post) and kg_post > 0 and edad_act >= EDAD_MIN_ANALISIS) else np.nan
 
-    # Banda biológica ±3%
-    bio_hi = [v * 1.03 if pd.notna(v) else np.nan for v in bio_y]
-    bio_lo = [v * 0.97 if pd.notna(v) else np.nan for v in bio_y]
-    figA.add_trace(go.Scatter(
-        x=edades_l + edades_l[::-1], y=bio_hi + bio_lo[::-1],
-        fill="toself", fillcolor="rgba(29,78,216,0.06)",
-        line=dict(color="rgba(0,0,0,0)"),
-        name="Rango bio ±3%", hoverinfo="skip",
-    ))
-    figA.add_trace(go.Scatter(
-        x=edades_l, y=bio_y, mode="lines",
-        name=f"Curva bio ({sexo_lote})",
-        line=dict(color=BLUE, width=2, dash="dash"),
-        hovertemplate="Día %{x}<br>Esperado: %{y:.3f} kg<extra></extra>",
-    ))
-    if mejor_id and not mejor_data.empty:
-        figA.add_trace(go.Scatter(
-            x=mejor_data["Edad"].tolist(),
-            y=mejor_data["PesoFinal"].tolist(),
-            mode="lines",
-            name=f"Mejor ref: {mejor_id} ({mejor_conv_v:+.1f}%)",
-            line=dict(color=GREEN, width=2.5),
-            hovertemplate="Día %{x}<br>Ref: %{y:.3f} kg<extra></extra>",
-        ))
-    figA.add_trace(go.Scatter(
-        x=edades_l, y=pesos_l,
-        mode="lines+markers", name=lote_sel,
-        line=dict(color=RED, width=3),
-        marker=dict(size=6, color=RED, line=dict(color="white", width=1.5)),
-        hovertemplate="Día %{x}<br>Peso real: %{y:.3f} kg<extra></extra>",
-    ))
+        # KPIs lote
+        h1,h2,h3,h4,h5,h6 = st.columns(6)
+        with h1: st.markdown(f'<div class="kpi-chip"><div class="kv">{il["GranjaID"]}</div><div class="kl">Granja</div></div>', unsafe_allow_html=True)
+        with h2: st.markdown(f'<div class="kpi-chip"><div class="kv">{il["ZonaNombre"]} · {il["TipoStd"]}</div><div class="kl">Segmento</div></div>', unsafe_allow_html=True)
+        with h3: st.markdown(f'<div class="kpi-chip"><div class="kv">{il["Quintil"]}</div><div class="kl">Quintil</div></div>', unsafe_allow_html=True)
+        with h4: st.markdown(f'<div class="kpi-chip"><div class="kv">{int(edad_act)} días</div><div class="kl">Edad</div></div>', unsafe_allow_html=True)
+        with h5:
+            col = RED if (pd.notna(delta_ck) and delta_ck > 0.03) else (AMBER if (pd.notna(delta_ck) and delta_ck > 0) else GREEN)
+            st.markdown(f'<div class="kpi-chip"><div class="kv" style="color:{col}">Δ {fmt_num(delta_ck,3,prefix="$",suffix="/kg")}</div><div class="kl">Gap $/kg</div></div>', unsafe_allow_html=True)
+        with h6:
+            col = RED if (pd.notna(loss_est) and loss_est > 0) else MUTED
+            st.markdown(f'<div class="kpi-chip"><div class="kv" style="color:{col}">{fmt_num(loss_est,0,prefix="$")}</div><div class="kl">Pérdida est.</div></div>', unsafe_allow_html=True)
 
-    figA.update_layout(
-        template="plotly_white", paper_bgcolor=CARD, plot_bgcolor=CARD,
-        height=340, margin=dict(l=6, r=10, t=18, b=10),
-        font=dict(family="DM Sans", size=12, color=TEXT),
-        legend=dict(orientation="h", y=-0.22, x=0, bgcolor="rgba(0,0,0,0)", font=dict(size=11)),
-        xaxis=dict(title="Edad (días)", gridcolor=BORDER, zeroline=False, dtick=7, color=TEXT),
-        yaxis=dict(title="Peso por ave (kg)", gridcolor=BORDER, zeroline=False, color=TEXT),
-        hovermode="x unified",
-    )
-    st.plotly_chart(figA, use_container_width=True)
-
-    # ── FIGURA: costo acumulado (por ave y por kg) ──
-    # Usamos y2 para que se entienda la magnitud de $/ave vs $/kg.
-    figC = go.Figure()
-    if "CostoAlimentoPorAveAcum" in lote_hist.columns:
-        figC.add_trace(go.Scatter(
-            x=edades_l,
-            y=lote_hist["CostoAlimentoPorAveAcum"].tolist(),
+        # Chart Real vs Ideal (peso)
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=hist["Edad"], y=hist["PesoFinal"],
             mode="lines+markers",
-            name="$/ave (acum)",
-            line=dict(color=AMBER, width=2.5),
+            name="REAL",
+            line=dict(color=RED, width=3),
             marker=dict(size=5),
-            hovertemplate="Día %{x}<br>$/ave acum: %{y:.3f}<extra></extra>",
+            hovertemplate="Día %{x}<br>REAL: %{y:.3f} kg<extra></extra>",
         ))
-    # $/kg acumulado: costo total / kg totales (si hay)
-    if "CostoAlimentoAcum" in lote_hist.columns and "AvesVivas" in lote_hist.columns and "PesoFinal" in lote_hist.columns:
-        kg_series = (lote_hist["AvesVivas"] * lote_hist["PesoFinal"]).replace(0, np.nan)
-        costo_kg_series = lote_hist["CostoAlimentoAcum"] / kg_series
-        figC.add_trace(go.Scatter(
-            x=edades_l,
-            y=costo_kg_series.tolist(),
+        fig.add_trace(go.Scatter(
+            x=ideal_seg["edad"], y=ideal_seg["peso"],
             mode="lines",
-            name="$/kg (acum)",
-            yaxis="y2",
-            line=dict(color=BLUE, width=2, dash="dot"),
-            hovertemplate="Día %{x}<br>$/kg acum: %{y:.3f}<extra></extra>",
+            name="IDEAL (segmento)",
+            line=dict(color=GREEN, width=3),
+            hovertemplate="Día %{x}<br>IDEAL: %{y:.3f} kg<extra></extra>",
         ))
+        fig.update_layout(
+            template="plotly_white",
+            paper_bgcolor=CARD, plot_bgcolor=CARD,
+            height=320,
+            margin=dict(l=8, r=8, t=18, b=8),
+            font=dict(family="DM Sans", size=12, color=TEXT),
+            legend=dict(orientation="h", y=-0.22, x=0, bgcolor="rgba(0,0,0,0)"),
+            xaxis=dict(title="Edad (días)", gridcolor=BORDER, zeroline=False, dtick=7, color=TEXT),
+            yaxis=dict(title="Peso por ave (kg)", gridcolor=BORDER, zeroline=False, color=TEXT),
+            hovermode="x unified",
+        )
+        st.plotly_chart(fig, use_container_width=True)
 
-    figC.update_layout(
-        template="plotly_white", paper_bgcolor=CARD, plot_bgcolor=CARD,
-        height=220, margin=dict(l=6, r=10, t=12, b=10),
-        font=dict(family="DM Sans", size=12, color=TEXT),
-        legend=dict(orientation="h", y=-0.28, x=0, bgcolor="rgba(0,0,0,0)", font=dict(size=11)),
-        xaxis=dict(title="Edad (días)", gridcolor=BORDER, zeroline=False, dtick=7, color=TEXT),
-        yaxis=dict(title="$/ave acum", gridcolor=BORDER, zeroline=False, color=TEXT),
-        yaxis2=dict(title="$/kg acum", overlaying="y", side="right", showgrid=False, zeroline=False, color=MUTED),
-        hovermode="x unified",
-    )
-    st.plotly_chart(figC, use_container_width=True)
+        base_lotes = ideal_seg.get("lotes_base", [])
+        if base_lotes:
+            st.caption("IDEAL interno construido con los mejores lotes disponibles en este archivo (top 5 por FCR desde día 15): "
+                       + ", ".join(base_lotes[:5]) + ("..." if len(base_lotes) > 5 else ""))
 
+# ──────────────────────────────────────────────────────────────
+# MITAD DERECHA (placeholder)
+# ──────────────────────────────────────────────────────────────
 with right:
-    # Mitad derecha en blanco, solo un placeholder visual leve
-    st.markdown(
-        f"""
-        <div style="background:{BG};border:1px dashed {BORDER};border-radius:12px;
-                    padding:16px;min-height:980px;">
-          <div style="color:{MUTED};font-weight:800;text-transform:uppercase;letter-spacing:0.7px;">
-            Mitad derecha (pendiente)
-          </div>
-          <div style="color:{MUTED};font-size:0.85rem;margin-top:6px;">
-            Espacio reservado para futuras visualizaciones. (Según tu pedido, aquí queda en blanco).
-          </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    md(f"""
+<div class="card" style="border:1px dashed {BORDER};background:{BG};min-height:980px;">
+  <div style="color:{MUTED};font-weight:800;text-transform:uppercase;letter-spacing:0.7px;">
+    Mitad derecha (pendiente)
+  </div>
+  <div style="color:{MUTED};font-size:0.85rem;margin-top:6px;">
+    Espacio reservado para futuras visualizaciones.
+  </div>
+</div>
+""")
 
-# ──────────────────────────────────────────────────────────────
-#  FOOTER
-# ──────────────────────────────────────────────────────────────
-st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
-st.markdown(
-    f"<div style='text-align:center;font-size:0.72rem;color:{MUTED};"
-    f"border-top:1px solid {BORDER};padding-top:10px'>"
-    f"PRONACA · Panel Operativo Avícola · Archivo: {ARCHIVO} · "
-    f"Generado {hoy:%d/%m/%Y %H:%M}</div>",
-    unsafe_allow_html=True,
-)
+md(f"""
+<div style="text-align:center;font-size:0.72rem;color:{MUTED};
+border-top:1px solid {BORDER};padding-top:10px;margin-top:10px">
+PRONACA · Dashboard costos · Archivo: {MAIN_FILE} · Generado {hoy:%d/%m/%Y %H:%M}
+</div>
+""")
