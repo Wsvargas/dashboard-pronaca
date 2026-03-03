@@ -886,8 +886,7 @@ display:flex;align-items:center;justify-content:center;">
         # Usamos el MISMO lote seleccionado en Sec 03 (lote_sel) y su histórico (DF)
         md(f"""
 <div class="sec-header">
-  <span class="sec-num">📊</span>
-  <div>
+  <div><span class="sec-num">04</span>
     <div class="sec-title">Predicción de Peso</div>
     <div class="sec-sub">Proyección al día 40 para el lote seleccionado</div>
   </div>
