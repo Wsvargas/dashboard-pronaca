@@ -1,10 +1,14 @@
 """
-PRONACA | Dashboard Producción Avícola v11 - FINAL
-===================================================
-Botones ultra compactos: solo código de lote (2601A, 2602B, etc.)
-
+PRONACA | Dashboard Producción Avícola v12 - INTERACTIVO
+=========================================================
+Mismo layout, métricas y cálculos que v11.
+NUEVO: Selecciones en cascada usando on_select="rerun"
+  - Gráfico Etapas (Sec 01)  → filtra granjas de Sec 02
+  - Gráfico Granjas (Sec 02) → selecciona granja (reemplaza selectbox)
+  - Tabla de Lotes (Sec 02)  → selecciona lote (reemplaza botones)
+  - Sec 03 se alimenta de la selección de Sec 02
 Ejecutar:
-    streamlit run dashboard_produccion_v11_final.py
+    streamlit run dashboard_produccion_v12_interactivo.py
 """
 import os
 import numpy as np
@@ -14,7 +18,7 @@ import plotly.graph_objects as go
 from datetime import datetime
 from textwrap import dedent
 
-# ───────────────────────────────────────────────���──────────────
+# ──────────────────────────────────────────────────────────────
 # CONFIG
 # ──────────────────────────────────────────────────────────────
 MAIN_FILE  = "produccion_actual_final_con_costos_alimento_v3.xlsx"
@@ -26,23 +30,10 @@ EDAD_CORTE = 14
 # PAGE CONFIG
 # ──────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="PRONACA | Producción Avícola v11",
+    page_title="PRONACA | Producción Avícola v12",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
-
-# ──────────────────────────────────────────────────────────────
-# CONFIGURACIÓN DE TEMA
-# ──────────────────────────────────────────────────────────────
-THEME_CONFIG = """
-<script>
-    document.documentElement.style.setProperty('--primary-color', '#DA291C');
-    document.documentElement.style.setProperty('--background-color', '#F3F4F6');
-    document.documentElement.style.setProperty('--secondary-background-color', '#FFFFFF');
-    document.documentElement.style.setProperty('--text-color', '#0B0B0C');
-</script>
-"""
-st.markdown(THEME_CONFIG, unsafe_allow_html=True)
 
 # ──────────────────────────────────────────────────────────────
 # BRAND TOKENS
@@ -99,29 +90,27 @@ def parse_num_series(s: pd.Series) -> pd.Series:
     ss = s.astype(str).str.strip()
     ss = ss.str.replace("\u00A0", "", regex=False).str.replace(" ", "", regex=False)
     ss = ss.str.replace(r"[^0-9,\.\-]", "", regex=True)
-    has_dot = ss.str.contains(r"\.", regex=True)
+    has_dot   = ss.str.contains(r"\.", regex=True)
     has_comma = ss.str.contains(",", regex=False)
     mask = has_dot & has_comma
-    ss.loc[mask] = ss.loc[mask].str.replace(".", "", regex=False).str.replace(",", ".", regex=False)
+    ss.loc[mask]  = ss.loc[mask].str.replace(".", "", regex=False).str.replace(",", ".", regex=False)
     ss.loc[~mask] = ss.loc[~mask].str.replace(",", ".", regex=False)
     return pd.to_numeric(ss, errors="coerce")
 
-def pick_first_col(df: pd.DataFrame, candidates: list[str]) -> str | None:
+def pick_first_col(df: pd.DataFrame, candidates: list) -> str | None:
     for c in candidates:
         if c in df.columns:
             return c
     return None
 
 def extract_lote_codigo(lote_completo: str) -> str:
-    """Extrae lote+galpon (ej: 2601A-01 de BUC1001-2601A-01-M)"""
     parts = str(lote_completo).split('-')
     if len(parts) >= 3:
-        # Partes: [0]=granja, [1]=lote, [2]=galpon, [3]=sexo
         return f"{parts[1]}-{parts[2]}"
     return str(lote_completo)
 
 # ──────────────────────────────────────────────────────────────
-# CSS
+# CSS (idéntico a v11)
 # ──────────────────────────────────────────────────────────────
 md(f"""
 <style>
@@ -199,40 +188,34 @@ footer {{ visibility: hidden; }}
     border:1px solid {BORDER};
     background:#F8FAFC;
 }}
-.badge.red {{ color:{RED}; border-color:rgba(218,41,28,.25); background:rgba(218,41,28,.06); }}
+.badge.red   {{ color:{RED};   border-color:rgba(218,41,28,.25); background:rgba(218,41,28,.06); }}
 .badge.amber {{ color:{AMBER}; border-color:rgba(217,119,6,.25); background:rgba(217,119,6,.07); }}
 .badge.green {{ color:{GREEN}; border-color:rgba(22,163,74,.25); background:rgba(22,163,74,.07); }}
-
-/* BOTONES ULTRA COMPACTOS */
-.stButton > button {{
-    background-color: {RED} !important;
-    color: white !important;
-    border: 0.5px solid {RED} !important;
-    font-weight: 500 !important;
-    font-size: 0.65rem !important;
-    letter-spacing: 0.2px !important;
-    transition: all 0.15s ease !important;
-    padding: 4px 6px !important;
-    height: auto !important;
-    min-height: 24px !important;
-    line-height: 1.2 !important;
+/* Pill de selección activa */
+.sel-pill {{
+    display:inline-flex; align-items:center; gap:6px;
+    background:rgba(218,41,28,0.08);
+    border:1px solid rgba(218,41,28,0.25);
+    border-radius:999px; padding:3px 10px;
+    font-size:0.72rem; font-weight:800; color:{RED};
+    margin-bottom:6px;
 }}
-
-.stButton > button:hover {{
-    background-color: #B8220F !important;
-    border-color: #B8220F !important;
-    box-shadow: 0 1px 4px rgba(218, 41, 28, 0.2) !important;
+.sel-pill-neutral {{
+    display:inline-flex; align-items:center; gap:6px;
+    background:rgba(29,78,216,0.08);
+    border:1px solid rgba(29,78,216,0.20);
+    border-radius:999px; padding:3px 10px;
+    font-size:0.72rem; font-weight:800; color:{BLUE};
+    margin-bottom:6px;
 }}
-
-.stButton > button:active {{
-    background-color: #9A1B0C !important;
-    border-color: #9A1B0C !important;
+.hint-text {{
+    font-size:0.72rem; color:{MUTED}; font-style:italic; margin-bottom:4px;
 }}
 </style>
 """)
 
 # ──────────────────────────────────────────────────────────────
-# DATA LOAD
+# DATA LOAD (idéntico a v11)
 # ──────────────────────────────────────────────────────────────
 if not os.path.exists(MAIN_FILE):
     st.error(f"❌ No se encontró {MAIN_FILE}")
@@ -242,51 +225,44 @@ if not os.path.exists(MAIN_FILE):
 def load_and_prepare(path: str) -> pd.DataFrame:
     df = pd.read_excel(path)
     df.columns = df.columns.astype(str).str.strip()
-    
-    col_lote = pick_first_col(df, ["LoteCompleto", "Codigo_Unico", "Lote"])
+
+    col_lote  = pick_first_col(df, ["LoteCompleto","Codigo_Unico","Lote"])
     if not col_lote:
         raise ValueError("No encuentro columna de lote.")
-    
-    col_edad = pick_first_col(df, ["Edad", "edad", "X4=Edad"])
-    col_peso = pick_first_col(df, ["PesoFinal", "Peso", "Y=Peso comp", "Peso comp"])
-    col_aves = pick_first_col(df, ["AvesVivas", "Aves Vivas", "Aves_netas", "Aves Neto", "Aves Neto ", "Aves Neto"])
-    col_cost = pick_first_col(df, ["CostoAlimentoAcum", "Costo alim acum", "CostoAlimentoAcumulado", "CostoAlimento_acumulado"])
-    col_alimkg = pick_first_col(df, ["Alimento_acumulado_kg", "Alimento acum", "Alimento_acum", "AlimAcumKg"])
-    col_zona = pick_first_col(df, ["zona", "Zona"])
-    col_tipo = pick_first_col(df, ["TipoGranja", "Tipo_Granja", "Tipo de granja", "X30=Granja Propia"])
-    col_quint = pick_first_col(df, ["quintil", "Quintil_Area_Crianza", "Quintil"])
-    col_est = pick_first_col(df, ["Estatus", "ESTATUS", "Status"])
-    col_estado_lote = pick_first_col(df, ["EstadoLote", "Estado_Lote", "estado_lote", "ESTADO LOTE"])
-    
+
+    col_edad  = pick_first_col(df, ["Edad","edad","X4=Edad"])
+    col_peso  = pick_first_col(df, ["PesoFinal","Peso","Y=Peso comp","Peso comp"])
+    col_aves  = pick_first_col(df, ["AvesVivas","Aves Vivas","Aves_netas","Aves Neto","Aves Neto "])
+    col_cost  = pick_first_col(df, ["CostoAlimentoAcum","Costo alim acum","CostoAlimentoAcumulado","CostoAlimento_acumulado"])
+    col_alimkg= pick_first_col(df, ["Alimento_acumulado_kg","Alimento acum","Alimento_acum","AlimAcumKg"])
+    col_zona  = pick_first_col(df, ["zona","Zona"])
+    col_tipo  = pick_first_col(df, ["TipoGranja","Tipo_Granja","Tipo de granja","X30=Granja Propia"])
+    col_quint = pick_first_col(df, ["quintil","Quintil_Area_Crianza","Quintil"])
+    col_est   = pick_first_col(df, ["Estatus","ESTATUS","Status"])
+    col_estado_lote = pick_first_col(df, ["EstadoLote","Estado_Lote","estado_lote","ESTADO LOTE"])
+
     df = df.rename(columns={
         col_lote: "LoteCompleto",
         col_edad: "Edad",
         col_peso: "PesoFinal",
         col_aves: "AvesVivas",
     })
-    
-    for c in ["Edad", "PesoFinal", "AvesVivas"]:
+
+    for c in ["Edad","PesoFinal","AvesVivas"]:
         df[c] = parse_num_series(df[c])
-    
-    if col_est:
-        df["Estatus"] = df[col_est].astype(str).str.upper().str.strip()
-    else:
-        df["Estatus"] = "ACTIVO"
-    
-    if col_estado_lote:
-        df["EstadoLote"] = df[col_estado_lote].astype(str).str.upper().str.strip()
-    else:
-        df["EstadoLote"] = "ABIERTO"
-    
+
+    df["Estatus"]    = df[col_est].astype(str).str.upper().str.strip() if col_est else "ACTIVO"
+    df["EstadoLote"] = df[col_estado_lote].astype(str).str.upper().str.strip() if col_estado_lote else "ABIERTO"
+
     if col_zona:
         z = parse_num_series(df[col_zona]).fillna(0).astype(int)
         df["ZonaNombre"] = np.where(z == 1, "BUCAY", "SANTO DOMINGO")
     else:
         pref = df["LoteCompleto"].astype(str).str[:3].str.upper()
-        df["ZonaNombre"] = pref.map({"BUC":"BUCAY", "STO":"SANTO DOMINGO"}).fillna("OTRA")
-    
+        df["ZonaNombre"] = pref.map({"BUC":"BUCAY","STO":"SANTO DOMINGO"}).fillna("OTRA")
+
     df["GranjaID"] = df["LoteCompleto"].astype(str).str[:7]
-    
+
     if col_tipo:
         t = df[col_tipo]
         if pd.api.types.is_numeric_dtype(t) or t.astype(str).str.fullmatch(r"[01]").fillna(False).any():
@@ -298,52 +274,38 @@ def load_and_prepare(path: str) -> pd.DataFrame:
             df.loc[ts.eq("PCA"), "TipoStd"] = "PAC"
     else:
         df["TipoStd"] = df["GranjaID"].apply(lambda g: "PROPIA" if str(g)[3] in ("1","2") else "PAC")
-    
-    if col_quint:
-        df["Quintil"] = df[col_quint].astype(str).str.upper().str.strip()
-    else:
-        df["Quintil"] = "Q5"
-    
-    df["Etapa"] = df["Edad"].apply(get_etapa)
-    
-    if col_cost:
-        df["CostoAcum"] = parse_num_series(df[col_cost])
-    else:
-        df["CostoAcum"] = np.nan
-    
-    if col_alimkg:
-        df["AlimAcumKg"] = parse_num_series(df[col_alimkg])
-    else:
-        df["AlimAcumKg"] = np.nan
-    
-    df["KgLive"] = (df["AvesVivas"] * df["PesoFinal"]).astype(float)
-    df["CostoKg_Cum"] = df["CostoAcum"] / df["KgLive"].replace(0, np.nan)
-    df["FCR_Cum"] = df["AlimAcumKg"] / df["KgLive"].replace(0, np.nan)
-    
-    col_mort_acum = pick_first_col(df, ["MortalidadAcumulada", "MORTALIDAD + DESCARTE"])
-    col_aves_neto = pick_first_col(df, ["Aves Neto", "Aves_netas"])
-    if col_mort_acum and col_aves_neto and col_mort_acum in df.columns and col_aves_neto in df.columns:
+
+    df["Quintil"] = df[col_quint].astype(str).str.upper().str.strip() if col_quint else "Q5"
+    df["Etapa"]   = df["Edad"].apply(get_etapa)
+
+    df["CostoAcum"]  = parse_num_series(df[col_cost])  if col_cost   else np.nan
+    df["AlimAcumKg"] = parse_num_series(df[col_alimkg]) if col_alimkg else np.nan
+
+    df["KgLive"]     = (df["AvesVivas"] * df["PesoFinal"]).astype(float)
+    df["CostoKg_Cum"]= df["CostoAcum"]  / df["KgLive"].replace(0, np.nan)
+    df["FCR_Cum"]    = df["AlimAcumKg"] / df["KgLive"].replace(0, np.nan)
+
+    col_mort_acum = pick_first_col(df, ["MortalidadAcumulada","MORTALIDAD + DESCARTE"])
+    col_aves_neto = pick_first_col(df, ["Aves Neto","Aves_netas"])
+    if col_mort_acum and col_aves_neto:
         df[col_mort_acum] = parse_num_series(df[col_mort_acum])
         df[col_aves_neto] = parse_num_series(df[col_aves_neto])
         df["MortPct"] = (df[col_mort_acum] / df[col_aves_neto].replace(0, np.nan) * 100).round(2)
     else:
         df["MortPct"] = np.nan
-    
-    df = df.sort_values(["LoteCompleto", "Edad"])
-    
-    return df
+
+    return df.sort_values(["LoteCompleto","Edad"])
 
 @st.cache_data(show_spinner=False)
 def load_ideales(path: str) -> pd.DataFrame:
     if not os.path.exists(path):
         return pd.DataFrame()
-    
     try:
         df = pd.read_excel(path, sheet_name="DATOS_COMPLETOS")
         df.columns = df.columns.astype(str).str.strip()
         df["Zona_Nombre"] = np.where(df.get("Zona", 1) == 1, "BUCAY", "SANTO DOMINGO")
-        df["TipoGranja"] = df.get("TipoGranja", "PAC").astype(str).str.upper().str.strip()
-        df["Quintil"] = df.get("Quintil_Area_Crianza", "Q5").astype(str).str.upper().str.strip()
+        df["TipoGranja"]  = df.get("TipoGranja","PAC").astype(str).str.upper().str.strip()
+        df["Quintil"]     = df.get("Quintil_Area_Crianza","Q5").astype(str).str.upper().str.strip()
         return df
     except Exception as e:
         st.warning(f"⚠️ Error cargando ideales: {e}")
@@ -355,13 +317,14 @@ def build_snapshot_activos(df_all: pd.DataFrame) -> pd.DataFrame:
     if act.empty:
         return pd.DataFrame()
     snap = (act.sort_values(["LoteCompleto","Edad"])
-              .groupby("LoteCompleto", as_index=False)
-              .last())
+               .groupby("LoteCompleto", as_index=False)
+               .last())
     snap["Etapa"] = snap["Edad"].apply(get_etapa)
     return snap
 
+# ── Carga ────────────────────────────────────────────────────
 with st.spinner("Cargando datos…"):
-    DF = load_and_prepare(MAIN_FILE)
+    DF      = load_and_prepare(MAIN_FILE)
     IDEALES = load_ideales(BENCH_FILE)
 
 with st.spinner("Procesando snapshot…"):
@@ -379,26 +342,26 @@ md(f"""
 <div class="pronaca-header">
   <div style="font-size:2.2rem;line-height:1">🐔</div>
   <div>
-    <div class="pronaca-header-title">PRONACA · PRODUCCIÓN AVÍCOLA v11</div>
-    <div class="pronaca-header-sub">Dashboard optimizado · Ideal vs Real</div>
+    <div class="pronaca-header-title">PRONACA · PRODUCCIÓN AVÍCOLA v12</div>
+    <div class="pronaca-header-sub">Dashboard Interactivo · Selecciona gráficos para filtrar en cascada</div>
   </div>
   <div class="pronaca-header-pill">📅 Corte {hoy:%d %b %Y}</div>
 </div>
 """)
 
 # ──────────────────────────────────────────────────────────────
-# FILTROS
+# FILTROS SUPERIORES (sin cambios respecto a v11)
 # ──────────────────────────────────────────────────────────────
 md('<div class="filter-bar">')
 fc1, fc2, fc3, fc4 = st.columns([1.3, 1.2, 1.2, 1.2])
 with fc1:
-    sel_zona = st.multiselect("📍 Zona", ["BUCAY","SANTO DOMINGO"], default=["BUCAY","SANTO DOMINGO"])
+    sel_zona  = st.multiselect("📍 Zona",   ["BUCAY","SANTO DOMINGO"],  default=["BUCAY","SANTO DOMINGO"])
 with fc2:
-    sel_tipo = st.multiselect("🏠 Tipo", ["PROPIA","PAC"], default=["PROPIA","PAC"])
+    sel_tipo  = st.multiselect("🏠 Tipo",   ["PROPIA","PAC"],           default=["PROPIA","PAC"])
 with fc3:
-    sel_quint = st.multiselect("🧩 Quintil", ["Q1","Q2","Q3","Q4","Q5"], default=["Q1","Q2","Q3","Q4","Q5"])
+    sel_quint = st.multiselect("🧩 Quintil",["Q1","Q2","Q3","Q4","Q5"],default=["Q1","Q2","Q3","Q4","Q5"])
 with fc4:
-    sel_estado = st.multiselect("🔄 Estado", ["ABIERTO","CERRADO"], default=["ABIERTO"])
+    sel_estado= st.multiselect("🔄 Estado", ["ABIERTO","CERRADO"],      default=["ABIERTO"])
 md("</div>")
 
 SF = SNAP.copy()
@@ -415,76 +378,70 @@ if SF.empty:
 # KPIs GLOBALES
 # ──────────────────────────────────────────────────────────────
 kg_live_total = SF["KgLive"].sum()
-costo_total = SF["CostoAcum"].sum()
-cost_per_kg = costo_total / (kg_live_total if kg_live_total else np.nan)
+costo_total   = SF["CostoAcum"].sum()
+cost_per_kg   = costo_total / (kg_live_total if kg_live_total else np.nan)
 
-k1,k2,k3,k4,k5 = st.columns(5)
-kpi = [
-    (k1, f"{SF['LoteCompleto'].nunique():,}", "Lotes activos", True, ""),
-    (k2, f"{int(SF['AvesVivas'].sum()):,}", "Aves vivas", True, ""),
-    (k3, fmt_num(kg_live_total,0,suffix=" kg"), "Kg live", True, ""),
-    (k4, fmt_num(costo_total,0,prefix="$"), "Costo total", True, ""),
-    (k5, fmt_num(cost_per_kg,3,prefix="$",suffix="/kg"), "Costo medio/kg", False, ""),
+k1, k2, k3, k4, k5 = st.columns(5)
+kpi_data = [
+    (k1, f"{SF['LoteCompleto'].nunique():,}",         "Lotes activos",  True),
+    (k2, f"{int(SF['AvesVivas'].sum()):,}",            "Aves vivas",     True),
+    (k3, fmt_num(kg_live_total,0,suffix=" kg"),        "Kg live",        True),
+    (k4, fmt_num(costo_total,0,prefix="$"),            "Costo total",    True),
+    (k5, fmt_num(cost_per_kg,3,prefix="$",suffix="/kg"),"Costo medio/kg",False),
 ]
-for col, val, lab, accent, extra_style in kpi:
+for col, val, lab, accent in kpi_data:
     with col:
-        st.markdown(
-            f'<div class="kpi-chip {"accent" if accent else ""}">'
-            f'<div class="kv" style="{extra_style}">{val}</div>'
-            f'<div class="kl">{lab}</div></div>',
-            unsafe_allow_html=True
-        )
+        md(f'<div class="kpi-chip {"accent" if accent else ""}"><div class="kv">{val}</div><div class="kl">{lab}</div></div>')
 
 # ──────────────────────────────────────────────────────────────
-# LAYOUT: MITAD IZQUIERDA + MITAD DERECHA
+# LAYOUT PRINCIPAL
 # ──────────────────────────────────────────────────────────────
 left, right = st.columns([1, 1], gap="large")
 
 # ══════════════════════════════════════════════════════════════
-# MITAD IZQUIERDA
+# MITAD IZQUIERDA — SECCIONES INTERACTIVAS EN CASCADA
 # ══════════════════════════════════════════════════════════════
 with left:
-    
-    # ──────────────────────────────────────────────────────────
-    # SECCIÓN 01: Gráfico PEQUEÑO (izq) + Tabla (der) LADO A LADO
-    # ──────────────────────────────────────────────────────────
+
+    # ══════════════════════════════════════════════════════════
+    # SECCIÓN 01 — Resumen por Etapa
+    # Clic en barra → filtra granjas en Sec 02
+    # ══════════════════════════════════════════════════════════
     md(f"""
 <div class="sec-header">
   <span class="sec-num">01</span>
   <div>
     <div class="sec-title">Resumen por Etapa</div>
-    <div class="sec-sub">Lotes, aves, costos y conversión</div>
+    <div class="sec-sub">🖱️ Haz clic en una barra para filtrar granjas abajo</div>
   </div>
 </div>
 """)
-    
-    rows = []
+
+    # ── Calcular filas de etapa ────────────────────────────────
+    rows_etapa = []
     for etapa in ETAPA_ORDER:
         g = SF[SF["Etapa"] == etapa].copy()
         if g.empty:
             continue
         n_lotes = g["LoteCompleto"].nunique()
-        aves = g["AvesVivas"].sum()
-        kg   = g["KgLive"].sum()
-        cost = g["CostoAcum"].sum()
-        mort = g["MortPct"].mean()
-        alim = g["AlimAcumKg"].sum()
-        fcr  = alim / kg if kg > 0 else np.nan
-        ck   = cost / kg if kg > 0 else np.nan
-        
-        badge = "green"
+        aves    = g["AvesVivas"].sum()
+        kg      = g["KgLive"].sum()
+        cost    = g["CostoAcum"].sum()
+        mort    = g["MortPct"].mean()
+        alim    = g["AlimAcumKg"].sum()
+        fcr     = alim / kg if kg > 0 else np.nan
+        ck      = cost / kg if kg > 0 else np.nan
+        badge   = "green"
         if pd.notna(ck) and ck >= 0.9: badge = "red"
         elif pd.notna(ck) and ck >= 0.75: badge = "amber"
-        rows.append((etapa, n_lotes, aves, kg, fcr, cost, ck, mort, badge))
-    
-    # LAYOUT 50/50: Gráfico izquierda + Tabla derecha
+        rows_etapa.append((etapa, n_lotes, aves, kg, fcr, cost, ck, mort, badge))
+
     col_graf, col_tabla = st.columns([0.4, 0.6], gap="small")
-    
+
     with col_graf:
-        # Gráfico pequeño
-        lotes_por_etapa = [r[1] for r in rows]
-        etapas_names = [r[0] for r in rows]
-        
+        etapas_names     = [r[0] for r in rows_etapa]
+        lotes_por_etapa  = [r[1] for r in rows_etapa]
+
         fig_barras = go.Figure()
         fig_barras.add_trace(go.Bar(
             x=etapas_names,
@@ -496,8 +453,7 @@ with left:
         ))
         fig_barras.update_layout(
             template="plotly_white",
-            paper_bgcolor=CARD, 
-            plot_bgcolor=CARD,
+            paper_bgcolor=CARD, plot_bgcolor=CARD,
             height=240,
             margin=dict(l=8, r=8, t=18, b=50),
             font=dict(family="DM Sans", size=9, color=TEXT),
@@ -505,28 +461,54 @@ with left:
             xaxis=dict(title="", gridcolor=BORDER, color=TEXT, tickangle=-45),
             yaxis=dict(title="Lotes", gridcolor=BORDER, color=TEXT),
         )
-        st.plotly_chart(fig_barras, width='stretch', config={"displayModeBar": False})
-    
+
+        # ── on_select="rerun" → selección interactiva ──────────
+        sel_etapa_chart = st.plotly_chart(
+            fig_barras,
+            on_select="rerun",
+            selection_mode="points",
+            key="chart_etapas",
+            config={"displayModeBar": False},
+            width="stretch",
+        )
+
+        # Etapas seleccionadas desde el gráfico
+        etapas_sel = [
+            p["x"]
+            for p in sel_etapa_chart.selection.get("points", [])
+            if "x" in p
+        ]
+
+        # Indicador visual de filtro activo
+        if etapas_sel:
+            etapa_label = " + ".join([e.split("(")[0].strip() for e in etapas_sel])
+            md(f'<div class="sel-pill">🔍 Filtrando: {etapa_label}</div>')
+        else:
+            md(f'<div class="hint-text">Clic en barra para filtrar ↓</div>')
+
     with col_tabla:
-        # Tabla compacta
         tbody = ""
-        for etapa, n_lotes, aves, kg, fcr, cost, ck, mort, badge in rows:
-            dot = ETAPA_COLORS.get(etapa, BLUE)
+        for etapa, n_lotes, aves, kg, fcr, cost, ck, mort, badge in rows_etapa:
+            dot      = ETAPA_COLORS.get(etapa, BLUE)
+            activa   = etapa in etapas_sel if etapas_sel else False
+            row_bg   = "rgba(218,41,28,0.05)" if activa else "transparent"
+            fw       = "900" if activa else "700"
             tbody += f"""
-<tr style="border-bottom:1px solid {BORDER}">
-  <td style="text-align:left;padding:6px 8px;font-weight:900;font-size:0.73rem">
-    <span style="display:inline-block;width:7px;height:7px;border-radius:2px;background:{dot};margin-right:5px;vertical-align:middle"></span>
+<tr style="border-bottom:1px solid {BORDER};background:{row_bg}">
+  <td style="text-align:left;padding:6px 8px;font-weight:{fw};font-size:0.73rem">
+    <span style="display:inline-block;width:7px;height:7px;border-radius:2px;
+                 background:{dot};margin-right:5px;vertical-align:middle"></span>
     {etapa.split('(')[0].strip()}
   </td>
   <td style="text-align:right;padding:6px 8px;font-size:0.73rem">{int(aves):,}</td>
   <td style="text-align:right;padding:6px 8px;font-size:0.73rem">{fmt_num(kg,0)}</td>
   <td style="text-align:right;padding:6px 8px;font-size:0.73rem">{fmt_num(fcr,3)}</td>
   <td style="text-align:right;padding:6px 8px;font-size:0.73rem">{fmt_num(cost,0,prefix="$")}</td>
-  <td style="text-align:right;padding:6px 8px;font-size:0.73rem"><span class="badge {badge}">{fmt_num(ck,3,prefix="$")}</span></td>
+  <td style="text-align:right;padding:6px 8px;font-size:0.73rem">
+    <span class="badge {badge}">{fmt_num(ck,3,prefix="$")}</span></td>
   <td style="text-align:right;padding:6px 8px;font-size:0.73rem">{fmt_num(mort,2,suffix="%")}</td>
-</tr>
-"""
-        
+</tr>"""
+
         md(f"""
 <div class="card" style="padding:0;overflow:auto;height:240px">
   <table style="width:100%;border-collapse:collapse">
@@ -545,106 +527,95 @@ with left:
   </table>
 </div>
 """)
-    
-    # ──────────────────────────────────────────────────────────
-    # SECCIÓN 02: Top 5 Granjas + Botones ultra compactos en filas de 5
-    # ──────────────────────────────────────────────────────────
+
+    # ══════════════════════════════════════════════════════════
+    # SECCIÓN 02 — Top 5 Granjas con Problemas
+    # Clic en barra → selecciona granja (reemplaza selectbox)
+    # Tabla de lotes → clic en fila selecciona lote para Sec 03
+    # ══════════════════════════════════════════════════════════
     md(f"""
 <div class="sec-header">
   <span class="sec-num">02</span>
   <div>
     <div class="sec-title">Top 5 Granjas con Problemas</div>
-    <div class="sec-sub">Lotes abiertos con gap de peso vs ideal (día 7+)</div>
+    <div class="sec-sub">🖱️ Clic en granja → ver lotes · Clic en lote → análisis Sec 03</div>
   </div>
 </div>
 """)
-    
-    SF_ABIERTOS = SF[SF["EstadoLote"] == "ABIERTO"].copy()
-    DF_ABIERTOS = DF[DF["EstadoLote"] == "ABIERTO"].copy()
-    
+
+    # ── Filtro por etapa si viene de Sec 01 ───────────────────
+    SF_SEC02 = SF.copy()
+    if etapas_sel:
+        SF_SEC02 = SF_SEC02[SF_SEC02["Etapa"].isin(etapas_sel)]
+
+    SF_ABIERTOS  = SF_SEC02[SF_SEC02["EstadoLote"] == "ABIERTO"].copy()
+    DF_ABIERTOS  = DF[DF["EstadoLote"] == "ABIERTO"].copy()
+
     if SF_ABIERTOS.empty:
-        st.warning("No hay lotes ABIERTOS con los filtros actuales.")
+        st.info("No hay lotes ABIERTOS con los filtros actuales.")
     else:
+        # ── Calcular granjas con problema ─────────────────────
         problemas_por_granja = []
-        
         for granja in SF_ABIERTOS["GranjaID"].unique():
             lotes_granja = DF_ABIERTOS[
-                (DF_ABIERTOS["GranjaID"] == granja) & 
+                (DF_ABIERTOS["GranjaID"] == granja) &
                 (DF_ABIERTOS["Edad"] >= EDAD_MIN_ANALISIS)
             ].copy()
-            
             if lotes_granja.empty:
                 continue
-            
-            lotes_lista = lotes_granja["LoteCompleto"].unique()
             n_lotes_problema = 0
-            gap_promedio_granja = 0
-            gap_count = 0
-            
-            for lote in lotes_lista:
-                lote_data = lotes_granja[lotes_granja["LoteCompleto"] == lote].copy()
-                snapshot_lote = lote_data.iloc[-1] if len(lote_data) > 0 else None
-                if snapshot_lote is None:
+            gap_acum = 0
+            gap_n    = 0
+            for lote in lotes_granja["LoteCompleto"].unique():
+                lote_data    = lotes_granja[lotes_granja["LoteCompleto"] == lote]
+                snap_lote    = lote_data.iloc[-1] if len(lote_data) > 0 else None
+                if snap_lote is None:
                     continue
-                
                 ideal_data = IDEALES[
-                    (IDEALES["Zona_Nombre"] == snapshot_lote["ZonaNombre"]) &
-                    (IDEALES["TipoGranja"] == snapshot_lote["TipoStd"]) &
-                    (IDEALES["Quintil"] == snapshot_lote["Quintil"])
+                    (IDEALES["Zona_Nombre"] == snap_lote["ZonaNombre"]) &
+                    (IDEALES["TipoGranja"]  == snap_lote["TipoStd"]) &
+                    (IDEALES["Quintil"]     == snap_lote["Quintil"])
                 ].copy()
-                
                 if ideal_data.empty:
                     continue
-                
-                gap_suma = 0
-                gap_count_lote = 0
-                
-                for _, ideal_row in ideal_data.iterrows():
-                    edad_ideal = ideal_row.get("Edad")
-                    peso_ideal = ideal_row.get("Peso")
-                    peso_real_row = lote_data[lote_data["Edad"] == edad_ideal]
-                    
-                    if not peso_real_row.empty and pd.notna(peso_ideal):
-                        peso_real = peso_real_row.iloc[0]["PesoFinal"]
-                        gap = peso_ideal - peso_real
-                        
-                        if gap > 0:
-                            gap_suma += gap
-                            gap_count_lote += 1
-                
-                if gap_count_lote > 0:
+                gs = gc = 0
+                for _, ir in ideal_data.iterrows():
+                    pr = lote_data[lote_data["Edad"] == ir.get("Edad")]
+                    if not pr.empty and pd.notna(ir.get("Peso")):
+                        g = ir["Peso"] - pr.iloc[0]["PesoFinal"]
+                        if g > 0:
+                            gs += g; gc += 1
+                if gc > 0:
                     n_lotes_problema += 1
-                    gap_promedio_granja += (gap_suma / gap_count_lote)
-                    gap_count += 1
-            
+                    gap_acum += gs / gc
+                    gap_n    += 1
             if n_lotes_problema > 0:
-                gap_final = gap_promedio_granja / gap_count if gap_count > 0 else 0
                 problemas_por_granja.append({
                     "GranjaID": granja,
                     "NumLotesProblema": n_lotes_problema,
-                    "GapPromedio": gap_final,
+                    "GapPromedio": gap_acum / gap_n if gap_n > 0 else 0,
                 })
-        
+
         if not problemas_por_granja:
-            st.warning("No hay granjas con lotes abiertos que presenten gap de peso vs ideal.")
+            st.warning("No hay granjas con gap de peso vs ideal.")
         else:
-            df_problemas = pd.DataFrame(problemas_por_granja)
-            df_problemas = df_problemas.sort_values("NumLotesProblema", ascending=False).head(5)
-            
-            # Gráfico
+            df_prob = (pd.DataFrame(problemas_por_granja)
+                       .sort_values("NumLotesProblema", ascending=False)
+                       .head(5))
+
+            # ── Gráfico granjas — INTERACTIVO ──────────────────
             fig_granjas = go.Figure()
             fig_granjas.add_trace(go.Bar(
-                x=df_problemas["GranjaID"],
-                y=df_problemas["NumLotesProblema"],
+                x=df_prob["GranjaID"],
+                y=df_prob["NumLotesProblema"],
                 marker=dict(color=RED),
-                text=df_problemas["NumLotesProblema"],
+                text=df_prob["NumLotesProblema"],
                 textposition="auto",
                 hovertemplate="<b>%{x}</b><br>Lotes problema: %{y}<extra></extra>",
             ))
             fig_granjas.update_layout(
                 template="plotly_white",
-                paper_bgcolor=CARD, 
-                plot_bgcolor=CARD,
+                paper_bgcolor=CARD, plot_bgcolor=CARD,
                 height=200,
                 margin=dict(l=8, r=8, t=18, b=8),
                 font=dict(family="DM Sans", size=10, color=TEXT),
@@ -652,265 +623,246 @@ with left:
                 xaxis=dict(title="Granja", gridcolor=BORDER, color=TEXT),
                 yaxis=dict(title="# Lotes Problema", gridcolor=BORDER, color=TEXT),
             )
-            st.plotly_chart(fig_granjas, width='stretch')
-            
-            # Selector granja
-            st.caption("**Selecciona granja para ver lotes:**")
-            granjas_list = df_problemas["GranjaID"].tolist()
-            sel_granja = st.selectbox("Granja", granjas_list, key="sel_granja_sec02")
-            
-            # Obtener lotes
+
+            sel_granja_chart = st.plotly_chart(
+                fig_granjas,
+                on_select="rerun",
+                selection_mode="points",
+                key="chart_granjas",
+                width="stretch",
+            )
+
+            # ── Granja activa ──────────────────────────────────
+            granjas_sel = [
+                p["x"]
+                for p in sel_granja_chart.selection.get("points", [])
+                if "x" in p
+            ]
+            granja_activa = granjas_sel[0] if granjas_sel else df_prob.iloc[0]["GranjaID"]
+
+            if granjas_sel:
+                md(f'<div class="sel-pill">🏭 Granja seleccionada: <strong>{granja_activa}</strong></div>')
+            else:
+                md(f'<div class="hint-text">Clic en barra para seleccionar granja · Mostrando: <strong>{granja_activa}</strong></div>')
+
+            # ── Calcular lotes de la granja activa ────────────
             lotes_granja_prob = []
-            lotes_granja = DF_ABIERTOS[
-                (DF_ABIERTOS["GranjaID"] == sel_granja) & 
+            lotes_g = DF_ABIERTOS[
+                (DF_ABIERTOS["GranjaID"] == granja_activa) &
                 (DF_ABIERTOS["Edad"] >= EDAD_MIN_ANALISIS)
             ].copy()
-            
-            for lote in lotes_granja["LoteCompleto"].unique():
-                lote_data = lotes_granja[lotes_granja["LoteCompleto"] == lote].copy()
-                snapshot_lote = lote_data.iloc[-1] if len(lote_data) > 0 else None
-                
-                if snapshot_lote is None:
+
+            for lote in lotes_g["LoteCompleto"].unique():
+                lote_data = lotes_g[lotes_g["LoteCompleto"] == lote]
+                snap_lote = lote_data.iloc[-1] if len(lote_data) > 0 else None
+                if snap_lote is None:
                     continue
-                
                 ideal_data = IDEALES[
-                    (IDEALES["Zona_Nombre"] == snapshot_lote["ZonaNombre"]) &
-                    (IDEALES["TipoGranja"] == snapshot_lote["TipoStd"]) &
-                    (IDEALES["Quintil"] == snapshot_lote["Quintil"])
+                    (IDEALES["Zona_Nombre"] == snap_lote["ZonaNombre"]) &
+                    (IDEALES["TipoGranja"]  == snap_lote["TipoStd"]) &
+                    (IDEALES["Quintil"]     == snap_lote["Quintil"])
                 ].copy()
-                
                 if ideal_data.empty:
                     continue
-                
-                gap_suma = 0
-                gap_count_lote = 0
-                
-                for _, ideal_row in ideal_data.iterrows():
-                    edad_ideal = ideal_row.get("Edad")
-                    peso_ideal = ideal_row.get("Peso")
-                    peso_real_row = lote_data[lote_data["Edad"] == edad_ideal]
-                    
-                    if not peso_real_row.empty and pd.notna(peso_ideal):
-                        peso_real = peso_real_row.iloc[0]["PesoFinal"]
-                        gap = peso_ideal - peso_real
-                        
-                        if gap > 0:
-                            gap_suma += gap
-                            gap_count_lote += 1
-                
-                if gap_count_lote > 0:
-                    gap_promedio = gap_suma / gap_count_lote
+                gs = gc = 0
+                for _, ir in ideal_data.iterrows():
+                    pr = lote_data[lote_data["Edad"] == ir.get("Edad")]
+                    if not pr.empty and pd.notna(ir.get("Peso")):
+                        g = ir["Peso"] - pr.iloc[0]["PesoFinal"]
+                        if g > 0: gs += g; gc += 1
+                if gc > 0:
+                    snap_r = SF[SF["LoteCompleto"] == lote]
+                    fcr_v  = float(snap_r.iloc[0]["FCR_Cum"])  if not snap_r.empty and pd.notna(snap_r.iloc[0]["FCR_Cum"])  else np.nan
+                    ck_v   = float(snap_r.iloc[0]["CostoKg_Cum"]) if not snap_r.empty and pd.notna(snap_r.iloc[0]["CostoKg_Cum"]) else np.nan
                     lotes_granja_prob.append({
                         "LoteCompleto": lote,
-                        "Edad": int(snapshot_lote["Edad"]),
-                        "Gap": gap_promedio,
+                        "Código":       extract_lote_codigo(lote),
+                        "Edad":         int(snap_lote["Edad"]),
+                        "Gap kg":       round(gs / gc, 3),
+                        "FCR":          round(fcr_v, 3) if pd.notna(fcr_v) else None,
+                        "$/kg":         round(ck_v, 3)  if pd.notna(ck_v)  else None,
                     })
-            
+
             if not lotes_granja_prob:
-                st.info(f"No hay lotes con problema en {sel_granja}.")
+                st.info(f"No hay lotes con problema en {granja_activa}.")
             else:
-                df_lotes_prob = pd.DataFrame(lotes_granja_prob).sort_values("Gap", ascending=False)
-                st.caption(f"**Lotes con problema en {sel_granja}:**")
-                
-                # ────────────────────────────────────────────────────────
-                # BOTONES ULTRA COMPACTOS EN FILAS DE 5
-                # Solo código de lote (ej: 2601A)
-                # ────────────────────────────────────────────────────────
-                num_cols = 5
-                rows_buttons = [df_lotes_prob.iloc[i:i+num_cols] for i in range(0, len(df_lotes_prob), num_cols)]
-                
-                for row_data in rows_buttons:
-                    cols = st.columns(num_cols)
-                    for idx, (_, lote_row) in enumerate(row_data.iterrows()):
-                        if idx < len(cols):
-                            with cols[idx]:
-                                # Extrae solo el código (ej: 2601A de BUC1001-2601A-01-M)
-                                codigo = extract_lote_codigo(lote_row['LoteCompleto'])
-                                label = codigo
-                                if st.button(label, key=f"lote_{lote_row['LoteCompleto']}", use_container_width=True):
-                                    st.session_state["lote_sel_sec03"] = lote_row["LoteCompleto"]
-                                    st.rerun()
-    
-    # ──────────────────────────────────────────────────────────
-    # SECCIÓN 03: Ideal vs Real + Gráfico Costo Perdido
-    # ──────────────────────────────────────────────────────────
+                df_lotes = (pd.DataFrame(lotes_granja_prob)
+                             .sort_values("Gap kg", ascending=False)
+                             .reset_index(drop=True))
+
+                md(f'<div class="hint-text">Clic en una fila para analizar ese lote en Sec 03 ↓</div>')
+
+                # ── Tabla INTERACTIVA de lotes ──────────────────
+                # Columnas visibles (sin LoteCompleto que va en sesión)
+                df_display = df_lotes[["Código","Edad","Gap kg","FCR","$/kg"]].copy()
+
+                sel_lote_table = st.dataframe(
+                    df_display,
+                    on_select="rerun",
+                    selection_mode="single-row",
+                    key="df_lotes_sec02",
+                    hide_index=True,
+                    use_container_width=True,
+                    height=180,
+                    column_config={
+                        "Código":  st.column_config.TextColumn("🔖 Código", width="small"),
+                        "Edad":    st.column_config.NumberColumn("Días", format="%d d", width="small"),
+                        "Gap kg":  st.column_config.NumberColumn("Gap kg ↑", format="%.3f", width="small"),
+                        "FCR":     st.column_config.NumberColumn("FCR", format="%.3f", width="small"),
+                        "$/kg":    st.column_config.NumberColumn("$/kg", format="$%.3f", width="small"),
+                    },
+                )
+
+                # ── Actualizar lote seleccionado en session_state
+                rows_sel = sel_lote_table.selection.get("rows", [])
+                if rows_sel:
+                    lote_desde_tabla = df_lotes.iloc[rows_sel[0]]["LoteCompleto"]
+                    if st.session_state.get("lote_sel_sec03") != lote_desde_tabla:
+                        st.session_state["lote_sel_sec03"] = lote_desde_tabla
+                        st.rerun()
+
+    # ══════════════════════════════════════════════════════════
+    # SECCIÓN 03 — Lote Seleccionado: IDEAL vs REAL
+    # Se alimenta de la selección en la tabla de Sec 02
+    # ══════════════════════════════════════════════════════════
     md(f"""
 <div class="sec-header">
   <span class="sec-num">03</span>
   <div>
     <div class="sec-title">Lote Seleccionado: IDEAL vs REAL</div>
-    <div class="sec-sub">Comparación con el ideal + Costo perdido acumulado</div>
+    <div class="sec-sub">Análisis detallado · selecciona un lote en la tabla de arriba</div>
   </div>
 </div>
 """)
-    
-    if "lote_sel_sec03" not in st.session_state:
-        lotes_disp = SF_ABIERTOS["LoteCompleto"].unique().tolist() if not SF_ABIERTOS.empty else SF["LoteCompleto"].unique().tolist()
-        if lotes_disp:
-            st.session_state["lote_sel_sec03"] = lotes_disp[0]
-        else:
-            st.warning("No hay lotes para analizar.")
-            st.stop()
-    
-    lote_sel = st.session_state.get("lote_sel_sec03")
+
+    # ── Lote activo ───────────────────────────────────────────
     lotes_disp = SF["LoteCompleto"].unique().tolist()
-    
+
+    if "lote_sel_sec03" not in st.session_state:
+        st.session_state["lote_sel_sec03"] = lotes_disp[0] if lotes_disp else None
+
+    lote_sel = st.session_state.get("lote_sel_sec03")
     if lote_sel not in lotes_disp:
         lote_sel = lotes_disp[0] if lotes_disp else None
         st.session_state["lote_sel_sec03"] = lote_sel
-    
+
     if not lote_sel:
+        st.info("Selecciona un lote en la tabla de arriba.")
         st.stop()
-    
-    with st.expander("🔎 Cambiar lote", expanded=False):
-        lote_pick = st.selectbox("Selecciona lote", lotes_disp, 
-                                 index=lotes_disp.index(lote_sel) if lote_sel in lotes_disp else 0,
-                                 key="lote_pick_sec03")
-        if lote_pick != lote_sel:
-            st.session_state["lote_sel_sec03"] = lote_pick
-            st.rerun()
-    
-    lote_sel = st.session_state.get("lote_sel_sec03", lotes_disp[0] if lotes_disp else None)
-    
-    il = SF[SF["LoteCompleto"] == lote_sel].iloc[0]
+
+    # Indicador del lote activo
+    md(f'<div class="sel-pill-neutral">📋 Analizando: <strong>{extract_lote_codigo(lote_sel)}</strong> · {lote_sel}</div>')
+
+    il   = SF[SF["LoteCompleto"] == lote_sel].iloc[0]
     hist = DF[DF["LoteCompleto"] == lote_sel].sort_values("Edad").copy()
-    
+
     if hist.empty:
         st.warning("No hay historial para este lote.")
         st.stop()
-    
-    edad_act = float(il["Edad"])
-    
+
+    edad_act   = float(il["Edad"])
     ideal_data = IDEALES[
         (IDEALES["Zona_Nombre"] == il["ZonaNombre"]) &
-        (IDEALES["TipoGranja"] == il["TipoStd"]) &
-        (IDEALES["Quintil"] == il["Quintil"])
+        (IDEALES["TipoGranja"]  == il["TipoStd"]) &
+        (IDEALES["Quintil"]     == il["Quintil"])
     ].copy()
-    
+
     if ideal_data.empty:
-        st.error(f"❌ No hay ideal en el archivo para: {il['ZonaNombre']} · {il['TipoStd']} · {il['Quintil']}")
-        st.info("No se puede proceder sin el ideal. Verifica que el archivo de benchmarks contenga este segmento.")
+        st.error(f"❌ Sin ideal para: {il['ZonaNombre']} · {il['TipoStd']} · {il['Quintil']}")
     else:
-        h1,h2,h3,h4 = st.columns(4)
-        with h1:
-            st.markdown(f'<div class="kpi-chip"><div class="kv">{il["GranjaID"]}</div><div class="kl">Granja</div></div>', unsafe_allow_html=True)
-        with h2:
-            st.markdown(f'<div class="kpi-chip"><div class="kv">{il["ZonaNombre"]}</div><div class="kl">Zona</div></div>', unsafe_allow_html=True)
-        with h3:
-            st.markdown(f'<div class="kpi-chip"><div class="kv">{il["TipoStd"]}</div><div class="kl">Tipo</div></div>', unsafe_allow_html=True)
-        with h4:
-            st.markdown(f'<div class="kpi-chip"><div class="kv">{int(edad_act)} días</div><div class="kl">Edad</div></div>', unsafe_allow_html=True)
-        
-        # GRÁFICO 1: Peso Real vs Ideal (limitado a +3 días)
-        fig = go.Figure()
-        
-        hist_valid = hist[hist["PesoFinal"].notna()].copy()
-        fig.add_trace(go.Scatter(
-            x=hist_valid["Edad"], 
-            y=hist_valid["PesoFinal"],
-            mode="lines+markers",
-            name="REAL",
-            line=dict(color=RED, width=3),
-            marker=dict(size=6),
-            hovertemplate="Día %{x}<br>REAL: %{y:.3f} kg<extra></extra>",
-        ))
-        
-        # Ideal limitado a +3 días del real
-        edad_max_real = float(hist_valid["Edad"].max())
+        # KPIs del lote
+        h1, h2, h3, h4 = st.columns(4)
+        for col_, val_, lbl_ in [
+            (h1, il["GranjaID"],       "Granja"),
+            (h2, il["ZonaNombre"],     "Zona"),
+            (h3, il["TipoStd"],        "Tipo"),
+            (h4, f"{int(edad_act)} d", "Edad"),
+        ]:
+            with col_:
+                md(f'<div class="kpi-chip"><div class="kv">{val_}</div><div class="kl">{lbl_}</div></div>')
+
+        # ── Gráfico Peso Real vs Ideal ─────────────────────────
+        hist_valid   = hist[hist["PesoFinal"].notna()].copy()
+        edad_max_real= float(hist_valid["Edad"].max())
         ideal_sorted = ideal_data.sort_values("Edad")
         ideal_sorted = ideal_sorted[ideal_sorted["Edad"] <= edad_max_real + 3]
-        
+
+        fig = go.Figure()
         fig.add_trace(go.Scatter(
-            x=ideal_sorted["Edad"], 
-            y=ideal_sorted["Peso"],
-            mode="lines+markers",
-            name="IDEAL",
+            x=hist_valid["Edad"], y=hist_valid["PesoFinal"],
+            mode="lines+markers", name="REAL",
+            line=dict(color=RED, width=3), marker=dict(size=6),
+            hovertemplate="Día %{x}<br>REAL: %{y:.3f} kg<extra></extra>",
+        ))
+        fig.add_trace(go.Scatter(
+            x=ideal_sorted["Edad"], y=ideal_sorted["Peso"],
+            mode="lines+markers", name="IDEAL",
             line=dict(color=GREEN, width=3, dash="dash"),
             marker=dict(size=6, symbol="diamond"),
             hovertemplate="Día %{x}<br>IDEAL: %{y:.3f} kg<extra></extra>",
         ))
-        
-        # GAP sombreado
-        ideal_for_merge = ideal_sorted[["Edad", "Peso"]].rename(columns={"Peso": "PesoIdeal"})
-        hist_merge = hist_valid.merge(ideal_for_merge, on="Edad", how="inner")
-        if not hist_merge.empty:
+        ideal_merge = ideal_sorted[["Edad","Peso"]].rename(columns={"Peso":"PesoIdeal"})
+        hm = hist_valid.merge(ideal_merge, on="Edad", how="inner")
+        if not hm.empty:
             fig.add_trace(go.Scatter(
-                x=hist_merge["Edad"].tolist() + hist_merge["Edad"].tolist()[::-1],
-                y=hist_merge["PesoFinal"].tolist() + hist_merge["PesoIdeal"].tolist()[::-1],
-                fill="toself",
-                name="GAP",
+                x=hm["Edad"].tolist() + hm["Edad"].tolist()[::-1],
+                y=hm["PesoFinal"].tolist() + hm["PesoIdeal"].tolist()[::-1],
+                fill="toself", name="GAP",
                 fillcolor="rgba(218,41,28,0.15)",
                 line=dict(color="rgba(255,255,255,0)"),
                 hoverinfo="skip",
             ))
-        
         fig.update_layout(
             template="plotly_white",
-            paper_bgcolor=CARD, 
-            plot_bgcolor=CARD,
-            height=300,
-            margin=dict(l=8, r=8, t=18, b=8),
+            paper_bgcolor=CARD, plot_bgcolor=CARD,
+            height=300, margin=dict(l=8, r=8, t=18, b=8),
             font=dict(family="DM Sans", size=11, color=TEXT),
             legend=dict(orientation="h", y=-0.15, x=0, bgcolor="rgba(0,0,0,0)"),
             xaxis=dict(title="Edad (días)", gridcolor=BORDER, color=TEXT),
             yaxis=dict(title="Peso (kg)", gridcolor=BORDER, color=TEXT),
             hovermode="x unified",
         )
-        
-        st.plotly_chart(fig, width='stretch')
-        
-        # GRÁFICO 2: Costo Perdido Acumulado (SIN TABLA)
+        st.plotly_chart(fig, width="stretch")
+
+        # ── Gráfico Costo Perdido Acumulado ────────────────────
         st.caption("**Costo perdido (Real vs Ideal) acumulado:**")
-        
+
         hist_costo = hist[hist["Edad"] >= EDAD_MIN_ANALISIS].copy()
-        ideal_for_cost = ideal_sorted[["Edad", "Peso"]].rename(columns={"Peso": "PesoIdeal"})
-        hist_costo = hist_costo.merge(ideal_for_cost, on="Edad", how="left")
-        
-        hist_costo["KgRealAcum"] = (hist_costo["AvesVivas"] * hist_costo["PesoFinal"]).cumsum()
-        hist_costo["KgIdealAcum"] = (hist_costo["AvesVivas"] * hist_costo["PesoIdeal"]).cumsum()
-        
-        hist_costo["CostoRealAcum"] = hist_costo["CostoAcum"]
+        ideal_cost = ideal_sorted[["Edad","Peso"]].rename(columns={"Peso":"PesoIdeal"})
+        hist_costo = hist_costo.merge(ideal_cost, on="Edad", how="left")
+
+        hist_costo["KgRealAcum"]   = (hist_costo["AvesVivas"] * hist_costo["PesoFinal"]).cumsum()
+        hist_costo["KgIdealAcum"]  = (hist_costo["AvesVivas"] * hist_costo["PesoIdeal"]).cumsum()
+        hist_costo["CostoRealAcum"]  = hist_costo["CostoAcum"]
         hist_costo["CostoIdealAcum"] = hist_costo["KgIdealAcum"] * hist_costo["CostoKg_Cum"]
-        
-        hist_costo["CostoPerdido"] = hist_costo["CostoRealAcum"] - hist_costo["CostoIdealAcum"]
-        hist_costo["CostoPerdido"] = hist_costo["CostoPerdido"].clip(lower=0)
-        
-        hist_costo_clean = hist_costo[["Edad", "CostoPerdido"]].dropna()
-        
+        hist_costo["CostoPerdido"]   = (hist_costo["CostoRealAcum"] - hist_costo["CostoIdealAcum"]).clip(lower=0)
+
+        hc_clean = hist_costo[["Edad","CostoPerdido"]].dropna()
+
         fig_costo = go.Figure()
         fig_costo.add_trace(go.Scatter(
-            x=hist_costo_clean["Edad"],
-            y=hist_costo_clean["CostoPerdido"],
-            mode="lines+markers",
-            name="Costo Perdido",
-            line=dict(color=RED, width=3),
-            marker=dict(size=7),
-            fill="tozeroy",
-            fillcolor="rgba(218,41,28,0.2)",
+            x=hc_clean["Edad"], y=hc_clean["CostoPerdido"],
+            mode="lines+markers", name="Costo Perdido",
+            line=dict(color=RED, width=3), marker=dict(size=7),
+            fill="tozeroy", fillcolor="rgba(218,41,28,0.2)",
             hovertemplate="Día %{x}<br>Pérdida: $%{y:,.2f}<extra></extra>",
         ))
-        
         fig_costo.update_layout(
             template="plotly_white",
-            paper_bgcolor=CARD,
-            plot_bgcolor=CARD,
-            height=280,
-            margin=dict(l=8, r=8, t=18, b=8),
+            paper_bgcolor=CARD, plot_bgcolor=CARD,
+            height=280, margin=dict(l=8, r=8, t=18, b=8),
             font=dict(family="DM Sans", size=11, color=TEXT),
             showlegend=False,
             xaxis=dict(title="Edad (días)", gridcolor=BORDER, color=TEXT),
             yaxis=dict(title="Costo Perdido ($)", gridcolor=BORDER, color=TEXT),
             hovermode="x unified",
         )
-        
-        st.plotly_chart(fig_costo, width='stretch')
+        st.plotly_chart(fig_costo, width="stretch")
 
-# ──────────────────────────────────────────────────────────────
-# MITAD DERECHA: PREDICCIÓN DE LOTES
-# ──────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════
+# MITAD DERECHA — PREDICCIÓN (sin cambios respecto a v11)
+# ══════════════════════════════════════════════════════════════
 with right:
-    
-    # Intentar cargar predictor
     try:
         from model_predictor import cargar_predictor
         predictor = cargar_predictor("model.pkl")
@@ -918,10 +870,11 @@ with right:
     except Exception as e:
         st.warning(f"⚠️ No se pudo cargar el predictor: {e}")
         predictor_disponible = False
-    
+
     if not predictor_disponible:
         md(f"""
-<div class="card" style="border:1px dashed {BORDER};background:{BG};min-height:1300px;display:flex;align-items:center;justify-content:center;">
+<div class="card" style="border:1px dashed {BORDER};background:{BG};min-height:1300px;
+display:flex;align-items:center;justify-content:center;">
   <div style="text-align:center;color:{MUTED};font-weight:800;text-transform:uppercase;letter-spacing:0.7px;">
     📊 Predicción de Lotes<br><br>
     ⚠️ Modelo no disponible<br>
@@ -939,143 +892,83 @@ with right:
   </div>
 </div>
 """)
-        
-        # Selector de lote para predicción
         lotes_abiertos = SF[SF["EstadoLote"] == "ABIERTO"]["LoteCompleto"].unique().tolist()
-        
+
         if not lotes_abiertos:
             st.info("No hay lotes abiertos para predecir")
         else:
-            # Selector
             lote_pred = st.selectbox(
                 "Selecciona lote para predicción:",
                 lotes_abiertos,
                 key="lote_pred_select"
             )
-            
-            # Obtener historial hasta día 14
             hist_pred = DF[
-                (DF["LoteCompleto"] == lote_pred) & 
+                (DF["LoteCompleto"] == lote_pred) &
                 (DF["Edad"] <= 14)
             ].sort_values("Edad").copy()
-            
+
             if hist_pred.empty:
                 st.warning(f"No hay datos hasta día 14 para {lote_pred}")
             else:
-                # Hacer predicción
                 resultado_pred = predictor.predict_weight(hist_pred, target_edad=30)
-                
                 if resultado_pred["error"]:
                     st.error(f"Error en predicción: {resultado_pred['error']}")
                 else:
-                    # Mostrar resultados
-                    edad_actual = resultado_pred["edad_actual"]
+                    edad_actual   = resultado_pred["edad_actual"]
                     peso_predicho = resultado_pred["prediccion"]
-                    confianza = resultado_pred["confianza"]
-                    
-                    # KPIs de predicción
+                    confianza     = resultado_pred["confianza"]
+
                     col1, col2 = st.columns(2)
-                    
                     with col1:
-                        st.markdown(
-                            f'<div class="kpi-chip accent"><div class="kv">{peso_predicho:.2f} kg</div><div class="kl">Peso Predicho Día 30</div></div>',
-                            unsafe_allow_html=True
-                        )
-                    
+                        md(f'<div class="kpi-chip accent"><div class="kv">{peso_predicho:.2f} kg</div><div class="kl">Peso Predicho Día 30</div></div>')
                     with col2:
-                        st.markdown(
-                            f'<div class="kpi-chip"><div class="kv">{confianza*100:.1f}%</div><div class="kl">Confianza</div></div>',
-                            unsafe_allow_html=True
-                        )
-                    
-                    # Gráfico: Histórico + Predicción
+                        md(f'<div class="kpi-chip"><div class="kv">{confianza*100:.1f}%</div><div class="kl">Confianza</div></div>')
+
                     fig_pred = go.Figure()
-                    
-                    # Datos históricos (hasta día 14)
+                    peso_dia14 = float(hist_pred.iloc[-1]["PesoFinal"])
                     fig_pred.add_trace(go.Scatter(
-                        x=hist_pred["Edad"],
-                        y=hist_pred["PesoFinal"],
-                        mode="lines+markers",
-                        name="HISTÓRICO",
-                        line=dict(color=BLUE, width=3),
-                        marker=dict(size=8),
+                        x=hist_pred["Edad"], y=hist_pred["PesoFinal"],
+                        mode="lines+markers", name="HISTÓRICO",
+                        line=dict(color=BLUE, width=3), marker=dict(size=8),
                         hovertemplate="Día %{x}<br>Peso: %{y:.3f} kg<extra></extra>",
                     ))
-                    
-                    # Proyección (día 14 a día 30)
-                    peso_dia14 = float(hist_pred.iloc[-1]["PesoFinal"])
-                    proyeccion_x = [float(edad_actual), 30]
-                    proyeccion_y = [peso_dia14, peso_predicho]
-                    
                     fig_pred.add_trace(go.Scatter(
-                        x=proyeccion_x,
-                        y=proyeccion_y,
-                        mode="lines+markers",
-                        name="PROYECCIÓN",
+                        x=[float(edad_actual), 30], y=[peso_dia14, peso_predicho],
+                        mode="lines+markers", name="PROYECCIÓN",
                         line=dict(color=RED, width=3, dash="dash"),
                         marker=dict(size=8, symbol="diamond"),
                         hovertemplate="Día %{x}<br>Peso: %{y:.3f} kg<extra></extra>",
                     ))
-                    
-                    # Área de confianza
-                    margen = peso_predicho * 0.05  # 5% de margen
-                    fig_pred.add_trace(go.Scatter(
-                        x=[30, 30],
-                        y=[peso_predicho - margen, peso_predicho + margen],
-                        mode="lines",
-                        line=dict(width=0),
-                        showlegend=False,
-                        hoverinfo="skip"
-                    ))
-                    
                     fig_pred.update_layout(
                         template="plotly_white",
-                        paper_bgcolor=CARD,
-                        plot_bgcolor=CARD,
-                        height=300,
-                        margin=dict(l=8, r=8, t=18, b=8),
+                        paper_bgcolor=CARD, plot_bgcolor=CARD,
+                        height=300, margin=dict(l=8, r=8, t=18, b=8),
                         font=dict(family="DM Sans", size=11, color=TEXT),
                         legend=dict(orientation="h", y=-0.15, x=0, bgcolor="rgba(0,0,0,0)"),
                         xaxis=dict(title="Edad (días)", gridcolor=BORDER, color=TEXT),
                         yaxis=dict(title="Peso (kg)", gridcolor=BORDER, color=TEXT),
                         hovermode="x unified",
                     )
-                    
-                    st.plotly_chart(fig_pred, width='stretch')
-                    
-                    # Comparación con ideal
+                    st.plotly_chart(fig_pred, width="stretch")
+
                     ideal_dia30 = IDEALES[
                         (IDEALES["Zona_Nombre"] == SF[SF["LoteCompleto"] == lote_pred].iloc[0]["ZonaNombre"]) &
-                        (IDEALES["TipoGranja"] == SF[SF["LoteCompleto"] == lote_pred].iloc[0]["TipoStd"]) &
-                        (IDEALES["Quintil"] == SF[SF["LoteCompleto"] == lote_pred].iloc[0]["Quintil"]) &
+                        (IDEALES["TipoGranja"]  == SF[SF["LoteCompleto"] == lote_pred].iloc[0]["TipoStd"]) &
+                        (IDEALES["Quintil"]     == SF[SF["LoteCompleto"] == lote_pred].iloc[0]["Quintil"]) &
                         (IDEALES["Edad"] == 30)
                     ]
-                    
                     if not ideal_dia30.empty:
                         peso_ideal_30 = float(ideal_dia30.iloc[0]["Peso"])
-                        diferencia = peso_ideal_30 - peso_predicho
-                        
-                        if diferencia > 0:
-                            badge_color = "red"
-                            texto = f"Atraso: {diferencia:.3f} kg"
-                        else:
-                            badge_color = "green"
-                            texto = f"Adelante: {abs(diferencia):.3f} kg"
-                        
-                        st.markdown(
-                            f'<div class="badge {badge_color}">{texto}</div>',
-                            unsafe_allow_html=True
-                        )
-                    
-                    # Información adicional
+                        dif = peso_ideal_30 - peso_predicho
+                        badge_c = "red" if dif > 0 else "green"
+                        texto   = f"Atraso: {dif:.3f} kg" if dif > 0 else f"Adelante: {abs(dif):.3f} kg"
+                        md(f'<div class="badge {badge_c}">{texto}</div>')
+
                     st.caption("**Info de la predicción:**")
                     col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("Edad Actual", f"{int(edad_actual)} días")
-                    with col2:
-                        st.metric("Peso Actual", f"{peso_dia14:.3f} kg")
-                    with col3:
-                        st.metric("Días Faltantes", f"{30 - int(edad_actual)} días")
+                    with col1: st.metric("Edad Actual",    f"{int(edad_actual)} días")
+                    with col2: st.metric("Peso Actual",    f"{peso_dia14:.3f} kg")
+                    with col3: st.metric("Días Faltantes", f"{30 - int(edad_actual)} días")
 
 # ──────────────────────────────────────────────────────────────
 # FOOTER
@@ -1083,6 +976,6 @@ with right:
 md(f"""
 <div style="text-align:center;font-size:0.72rem;color:{MUTED};
 border-top:1px solid {BORDER};padding-top:10px;margin-top:20px">
-PRONACA · Dashboard v11 · {hoy:%d/%m/%Y %H:%M}
+PRONACA · Dashboard v12 · Interactivo · {hoy:%d/%m/%Y %H:%M}
 </div>
 """)
