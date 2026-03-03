@@ -202,6 +202,29 @@ footer {{ visibility: hidden; }}
 .badge.amber {{ color:{AMBER}; border-color:rgba(217,119,6,.25); background:rgba(217,119,6,.07); }}
 .badge.green {{ color:{GREEN}; border-color:rgba(22,163,74,.25); background:rgba(22,163,74,.07); }}
 
+/* ESTILOS PARA BOTONES DE LOTES */
+.stButton > button {{
+    background-color: {RED} !important;
+    color: white !important;
+    border: 2px solid {RED} !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.5px !important;
+    transition: all 0.3s ease !important;
+    padding: 10px 16px !important;
+}}
+
+.stButton > button:hover {{
+    background-color: #B8220F !important;
+    border-color: #B8220F !important;
+    box-shadow: 0 4px 12px rgba(218, 41, 28, 0.3) !important;
+    transform: translateY(-2px) !important;
+}}
+
+.stButton > button:active {{
+    background-color: #9A1B0C !important;
+    border-color: #9A1B0C !important;
+}}
+
 .lotes-grid {{
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -917,16 +940,176 @@ with left:
         st.plotly_chart(fig_costo, width='stretch')
 
 # ──────────────────────────────────────────────────────────────
-# MITAD DERECHA: VACÍA
+# MITAD DERECHA: PREDICCIÓN DE LOTES
 # ──────────────────────────────────────────────────────────────
 with right:
-    md(f"""
+    
+    # Intentar cargar predictor
+    try:
+        from model_predictor import cargar_predictor
+        predictor = cargar_predictor("model.pkl")
+        predictor_disponible = predictor.model is not None
+    except Exception as e:
+        st.warning(f"⚠️ No se pudo cargar el predictor: {e}")
+        predictor_disponible = False
+    
+    if not predictor_disponible:
+        md(f"""
 <div class="card" style="border:1px dashed {BORDER};background:{BG};min-height:1300px;display:flex;align-items:center;justify-content:center;">
   <div style="text-align:center;color:{MUTED};font-weight:800;text-transform:uppercase;letter-spacing:0.7px;">
-    Espacio reservado<br>para futuras visualizaciones
+    📊 Predicción de Lotes<br><br>
+    ⚠️ Modelo no disponible<br>
+    Coloca model.pkl en la carpeta del app
   </div>
 </div>
 """)
+    else:
+        md(f"""
+<div class="sec-header">
+  <span class="sec-num">📊</span>
+  <div>
+    <div class="sec-title">Predicción de Peso</div>
+    <div class="sec-sub">Proyección al día 30 para lotes abiertos</div>
+  </div>
+</div>
+""")
+        
+        # Selector de lote para predicción
+        lotes_abiertos = SF[SF["EstadoLote"] == "ABIERTO"]["LoteCompleto"].unique().tolist()
+        
+        if not lotes_abiertos:
+            st.info("No hay lotes abiertos para predecir")
+        else:
+            # Selector
+            lote_pred = st.selectbox(
+                "Selecciona lote para predicción:",
+                lotes_abiertos,
+                key="lote_pred_select"
+            )
+            
+            # Obtener historial hasta día 14
+            hist_pred = DF[
+                (DF["LoteCompleto"] == lote_pred) & 
+                (DF["Edad"] <= 14)
+            ].sort_values("Edad").copy()
+            
+            if hist_pred.empty:
+                st.warning(f"No hay datos hasta día 14 para {lote_pred}")
+            else:
+                # Hacer predicción
+                resultado_pred = predictor.predict_weight(hist_pred, target_edad=30)
+                
+                if resultado_pred["error"]:
+                    st.error(f"Error en predicción: {resultado_pred['error']}")
+                else:
+                    # Mostrar resultados
+                    edad_actual = resultado_pred["edad_actual"]
+                    peso_predicho = resultado_pred["prediccion"]
+                    confianza = resultado_pred["confianza"]
+                    
+                    # KPIs de predicción
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.markdown(
+                            f'<div class="kpi-chip accent"><div class="kv">{peso_predicho:.2f} kg</div><div class="kl">Peso Predicho Día 30</div></div>',
+                            unsafe_allow_html=True
+                        )
+                    
+                    with col2:
+                        st.markdown(
+                            f'<div class="kpi-chip"><div class="kv">{confianza*100:.1f}%</div><div class="kl">Confianza</div></div>',
+                            unsafe_allow_html=True
+                        )
+                    
+                    # Gráfico: Histórico + Predicción
+                    fig_pred = go.Figure()
+                    
+                    # Datos históricos (hasta día 14)
+                    fig_pred.add_trace(go.Scatter(
+                        x=hist_pred["Edad"],
+                        y=hist_pred["PesoFinal"],
+                        mode="lines+markers",
+                        name="HISTÓRICO",
+                        line=dict(color=BLUE, width=3),
+                        marker=dict(size=8),
+                        hovertemplate="Día %{x}<br>Peso: %{y:.3f} kg<extra></extra>",
+                    ))
+                    
+                    # Proyección (día 14 a día 30)
+                    peso_dia14 = float(hist_pred.iloc[-1]["PesoFinal"])
+                    proyeccion_x = [float(edad_actual), 30]
+                    proyeccion_y = [peso_dia14, peso_predicho]
+                    
+                    fig_pred.add_trace(go.Scatter(
+                        x=proyeccion_x,
+                        y=proyeccion_y,
+                        mode="lines+markers",
+                        name="PROYECCIÓN",
+                        line=dict(color=RED, width=3, dash="dash"),
+                        marker=dict(size=8, symbol="diamond"),
+                        hovertemplate="Día %{x}<br>Peso: %{y:.3f} kg<extra></extra>",
+                    ))
+                    
+                    # Área de confianza
+                    margen = peso_predicho * 0.05  # 5% de margen
+                    fig_pred.add_trace(go.Scatter(
+                        x=[30, 30],
+                        y=[peso_predicho - margen, peso_predicho + margen],
+                        mode="lines",
+                        line=dict(width=0),
+                        showlegend=False,
+                        hoverinfo="skip"
+                    ))
+                    
+                    fig_pred.update_layout(
+                        template="plotly_white",
+                        paper_bgcolor=CARD,
+                        plot_bgcolor=CARD,
+                        height=300,
+                        margin=dict(l=8, r=8, t=18, b=8),
+                        font=dict(family="DM Sans", size=11, color=TEXT),
+                        legend=dict(orientation="h", y=-0.15, x=0, bgcolor="rgba(0,0,0,0)"),
+                        xaxis=dict(title="Edad (días)", gridcolor=BORDER, color=TEXT),
+                        yaxis=dict(title="Peso (kg)", gridcolor=BORDER, color=TEXT),
+                        hovermode="x unified",
+                    )
+                    
+                    st.plotly_chart(fig_pred, width='stretch')
+                    
+                    # Comparación con ideal
+                    ideal_dia30 = IDEALES[
+                        (IDEALES["Zona_Nombre"] == SF[SF["LoteCompleto"] == lote_pred].iloc[0]["ZonaNombre"]) &
+                        (IDEALES["TipoGranja"] == SF[SF["LoteCompleto"] == lote_pred].iloc[0]["TipoStd"]) &
+                        (IDEALES["Quintil"] == SF[SF["LoteCompleto"] == lote_pred].iloc[0]["Quintil"]) &
+                        (IDEALES["Edad"] == 30)
+                    ]
+                    
+                    if not ideal_dia30.empty:
+                        peso_ideal_30 = float(ideal_dia30.iloc[0]["Peso"])
+                        diferencia = peso_ideal_30 - peso_predicho
+                        
+                        if diferencia > 0:
+                            badge_color = "red"
+                            texto = f"Atraso: {diferencia:.3f} kg"
+                        else:
+                            badge_color = "green"
+                            texto = f"Adelante: {abs(diferencia):.3f} kg"
+                        
+                        st.markdown(
+                            f'<div class="badge {badge_color}">{texto}</div>',
+                            unsafe_allow_html=True
+                        )
+                    
+                    # Información adicional
+                    st.caption("**Info de la predicción:**")
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Edad Actual", f"{int(edad_actual)} días")
+                    with col2:
+                        st.metric("Peso Actual", f"{peso_dia14:.3f} kg")
+                    with col3:
+                        st.metric("Días Faltantes", f"{30 - int(edad_actual)} días")
 
 # ──────────────────────────────────────────────────────────────
 # FOOTER
