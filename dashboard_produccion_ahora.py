@@ -654,7 +654,7 @@ with left:
         yaxis=dict(title="Peso (kg)",gridcolor=BORDER,color=TEXT),
         hovermode="x unified",
     )
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, width="stretch", key=f"chart_ideal_real_{lote_sel}")
 
     # Gráfico Costo Perdido
     st.caption("**Costo perdido (Real vs Ideal) acumulado:**")
@@ -683,7 +683,7 @@ with left:
         yaxis=dict(title="Costo Perdido ($)",gridcolor=BORDER,color=TEXT),
         hovermode="x unified",
     )
-    st.plotly_chart(fig_c, width="stretch")
+    st.plotly_chart(fig_c, width="stretch", key=f"chart_costo_{lote_sel}")
 
 # ══════════════════════════════════════════════════════════════
 # COLUMNA DERECHA — PREDICCIÓN SINCRONIZADA CON lote_sel
@@ -778,7 +778,7 @@ display:flex;align-items:center;justify-content:center;">
                         yaxis=dict(title="Peso (kg)",gridcolor=BORDER,color=TEXT),
                         hovermode="x unified",
                     )
-                    st.plotly_chart(fig_p, width="stretch")
+                    st.plotly_chart(fig_p, width="stretch", key=f"chart_pred_{lote_sel}")
 
                     # Comparación con ideal día 40
                     try:
