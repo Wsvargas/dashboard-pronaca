@@ -1,14 +1,10 @@
 """
-PRONACA | Dashboard Producción Avícola v11
-===========================================
-Basado en versión que funcionaba + cambios solicitados:
-- Sección 01: Gráfico pequeño (izq) + Tabla (der) lado a lado
-- Sección 02: Grid HTML/CSS interactivo de lotes
-- Sección 03: Real vs Ideal + Gráfico Costo Perdido (sin tabla)
-             Ideal limitado a +3 días del real
+PRONACA | Dashboard Producción Avícola v11 - FINAL
+===================================================
+Botones ultra compactos: solo código de lote (2601A, 2602B, etc.)
 
 Ejecutar:
-    streamlit run dashboard_produccion_v11.py
+    streamlit run dashboard_produccion_v11_final.py
 """
 import os
 import numpy as np
@@ -18,7 +14,7 @@ import plotly.graph_objects as go
 from datetime import datetime
 from textwrap import dedent
 
-# ──────────────────────────────────────────────────────────────
+# ───────────────────────────────────────────────���──────────────
 # CONFIG
 # ──────────────────────────────────────────────────────────────
 MAIN_FILE  = "produccion_actual_final_con_costos_alimento_v3.xlsx"
@@ -36,19 +32,16 @@ st.set_page_config(
 )
 
 # ──────────────────────────────────────────────────────────────
-# CONFIGURACIÓN DE TEMA (En lugar de config.toml)
+# CONFIGURACIÓN DE TEMA
 # ──────────────────────────────────────────────────────────────
 THEME_CONFIG = """
 <script>
-    // Inyectar estilos de tema personalizados
     document.documentElement.style.setProperty('--primary-color', '#DA291C');
     document.documentElement.style.setProperty('--background-color', '#F3F4F6');
     document.documentElement.style.setProperty('--secondary-background-color', '#FFFFFF');
     document.documentElement.style.setProperty('--text-color', '#0B0B0C');
 </script>
 """
-
-# Aplicar tema al cargar
 st.markdown(THEME_CONFIG, unsafe_allow_html=True)
 
 # ──────────────────────────────────────────────────────────────
@@ -118,6 +111,14 @@ def pick_first_col(df: pd.DataFrame, candidates: list[str]) -> str | None:
         if c in df.columns:
             return c
     return None
+
+def extract_lote_codigo(lote_completo: str) -> str:
+    """Extrae lote+galpon (ej: 2601A-01 de BUC1001-2601A-01-M)"""
+    parts = str(lote_completo).split('-')
+    if len(parts) >= 3:
+        # Partes: [0]=granja, [1]=lote, [2]=galpon, [3]=sexo
+        return f"{parts[1]}-{parts[2]}"
+    return str(lote_completo)
 
 # ──────────────────────────────────────────────────────────────
 # CSS
@@ -202,77 +203,30 @@ footer {{ visibility: hidden; }}
 .badge.amber {{ color:{AMBER}; border-color:rgba(217,119,6,.25); background:rgba(217,119,6,.07); }}
 .badge.green {{ color:{GREEN}; border-color:rgba(22,163,74,.25); background:rgba(22,163,74,.07); }}
 
-/* ESTILOS PARA BOTONES DE LOTES */
+/* BOTONES ULTRA COMPACTOS */
 .stButton > button {{
     background-color: {RED} !important;
     color: white !important;
-    border: 2px solid {RED} !important;
-    font-weight: 700 !important;
-    letter-spacing: 0.5px !important;
-    transition: all 0.3s ease !important;
-    padding: 10px 16px !important;
+    border: 0.5px solid {RED} !important;
+    font-weight: 500 !important;
+    font-size: 0.65rem !important;
+    letter-spacing: 0.2px !important;
+    transition: all 0.15s ease !important;
+    padding: 4px 6px !important;
+    height: auto !important;
+    min-height: 24px !important;
+    line-height: 1.2 !important;
 }}
 
 .stButton > button:hover {{
     background-color: #B8220F !important;
     border-color: #B8220F !important;
-    box-shadow: 0 4px 12px rgba(218, 41, 28, 0.3) !important;
-    transform: translateY(-2px) !important;
+    box-shadow: 0 1px 4px rgba(218, 41, 28, 0.2) !important;
 }}
 
 .stButton > button:active {{
     background-color: #9A1B0C !important;
     border-color: #9A1B0C !important;
-}}
-
-.lotes-grid {{
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 10px;
-    padding: 12px;
-    background: #f8fafc;
-    border-radius: 8px;
-    border: 1px solid #e2e8f0;
-    margin: 8px 0;
-}}
-
-.lote-card {{
-    background: white;
-    border: 2px solid #e2e8f0;
-    border-radius: 6px;
-    padding: 14px;
-    cursor: pointer;
-    transition: all 0.25s ease;
-    user-select: none;
-}}
-
-.lote-card:hover {{
-    border-color: #da291c;
-    box-shadow: 0 2px 8px rgba(218, 41, 28, 0.15);
-    transform: translateY(-2px);
-}}
-
-.lote-card.selected {{
-    background: #da291c;
-    border-color: #da291c;
-    color: white;
-    box-shadow: 0 4px 12px rgba(218, 41, 28, 0.3);
-}}
-
-.lote-codigo {{
-    font-weight: 700;
-    font-size: 0.80rem;
-    margin-bottom: 6px;
-    letter-spacing: 0.5px;
-}}
-
-.lote-gap {{
-    font-size: 0.72rem;
-    opacity: 0.7;
-}}
-
-.lote-card.selected .lote-gap {{
-    opacity: 0.9;
 }}
 </style>
 """)
@@ -593,7 +547,7 @@ with left:
 """)
     
     # ──────────────────────────────────────────────────────────
-    # SECCIÓN 02: Top 5 Granjas + Grid Interactivo de Lotes
+    # SECCIÓN 02: Top 5 Granjas + Botones ultra compactos en filas de 5
     # ──────────────────────────────────────────────────────────
     md(f"""
 <div class="sec-header">
@@ -758,12 +712,24 @@ with left:
                 df_lotes_prob = pd.DataFrame(lotes_granja_prob).sort_values("Gap", ascending=False)
                 st.caption(f"**Lotes con problema en {sel_granja}:**")
                 
-                # Mostrar como lista de botones compacta (SIN HTML)
-                for _, row in df_lotes_prob.iterrows():
-                    label = f"{row['LoteCompleto']} · Gap: {fmt_num(row['Gap'], 3, suffix=' kg')} · {int(row['Edad'])} días"
-                    if st.button(label, key=f"lote_{row['LoteCompleto']}", width='stretch'):
-                        st.session_state["lote_sel_sec03"] = row["LoteCompleto"]
-                        st.rerun()
+                # ────────────────────────────────────────────────────────
+                # BOTONES ULTRA COMPACTOS EN FILAS DE 5
+                # Solo código de lote (ej: 2601A)
+                # ────────────────────────────────────────────────────────
+                num_cols = 5
+                rows_buttons = [df_lotes_prob.iloc[i:i+num_cols] for i in range(0, len(df_lotes_prob), num_cols)]
+                
+                for row_data in rows_buttons:
+                    cols = st.columns(num_cols)
+                    for idx, (_, lote_row) in enumerate(row_data.iterrows()):
+                        if idx < len(cols):
+                            with cols[idx]:
+                                # Extrae solo el código (ej: 2601A de BUC1001-2601A-01-M)
+                                codigo = extract_lote_codigo(lote_row['LoteCompleto'])
+                                label = codigo
+                                if st.button(label, key=f"lote_{lote_row['LoteCompleto']}", use_container_width=True):
+                                    st.session_state["lote_sel_sec03"] = lote_row["LoteCompleto"]
+                                    st.rerun()
     
     # ──────────────────────────────────────────────────────────
     # SECCIÓN 03: Ideal vs Real + Gráfico Costo Perdido
@@ -779,11 +745,11 @@ with left:
 """)
     
     if "lote_sel_sec03" not in st.session_state:
-        lotes_disp = SF_ABIERTOS["LoteCompleto"].unique().tolist()
+        lotes_disp = SF_ABIERTOS["LoteCompleto"].unique().tolist() if not SF_ABIERTOS.empty else SF["LoteCompleto"].unique().tolist()
         if lotes_disp:
             st.session_state["lote_sel_sec03"] = lotes_disp[0]
         else:
-            st.warning("No hay lotes abiertos para analizar.")
+            st.warning("No hay lotes para analizar.")
             st.stop()
     
     lote_sel = st.session_state.get("lote_sel_sec03")
