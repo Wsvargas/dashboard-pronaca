@@ -860,12 +860,12 @@ with left:
         st.plotly_chart(fig_costo, width="stretch")
 
 # ══════════════════════════════════════════════════════════════
-# MITAD DERECHA — PREDICCIÓN (sin cambios respecto a v11)
+# MITAD DERECHA — PREDICCIÓN (PROYECCIÓN A DÍA 40 DEL LOTE DE SEC 03)
 # ══════════════════════════════════════════════════════════════
 with right:
     try:
         from model_predictor import cargar_predictor
-        predictor = cargar_predictor("model.pkl")
+        predictor = cargar_predictor("modelo_rf_avicola.joblib")
         predictor_disponible = predictor.model is not None
     except Exception as e:
         st.warning(f"⚠️ No se pudo cargar el predictor: {e}")
@@ -878,99 +878,119 @@ display:flex;align-items:center;justify-content:center;">
   <div style="text-align:center;color:{MUTED};font-weight:800;text-transform:uppercase;letter-spacing:0.7px;">
     📊 Predicción de Lotes<br><br>
     ⚠️ Modelo no disponible<br>
-    Coloca model.pkl en la carpeta del app
+    Coloca <strong>modelo_rf_avicola.joblib</strong> en la carpeta del app
   </div>
 </div>
 """)
     else:
+        # Usamos el MISMO lote seleccionado en Sec 03 (lote_sel) y su histórico (DF)
         md(f"""
 <div class="sec-header">
   <span class="sec-num">📊</span>
   <div>
     <div class="sec-title">Predicción de Peso</div>
-    <div class="sec-sub">Proyección al día 30 para lotes abiertos</div>
+    <div class="sec-sub">Proyección al día 40 para el lote seleccionado</div>
   </div>
 </div>
 """)
-        lotes_abiertos = SF[SF["EstadoLote"] == "ABIERTO"]["LoteCompleto"].unique().tolist()
 
-        if not lotes_abiertos:
-            st.info("No hay lotes abiertos para predecir")
+        # lote_sel viene de Sec 03
+        if "lote_sel" not in locals() or not lote_sel:
+            st.info("Selecciona un lote en la Sección 03 para ver la predicción.")
         else:
-            lote_pred = st.selectbox(
-                "Selecciona lote para predicción:",
-                lotes_abiertos,
-                key="lote_pred_select"
-            )
-            hist_pred = DF[
-                (DF["LoteCompleto"] == lote_pred) &
-                (DF["Edad"] <= 14)
-            ].sort_values("Edad").copy()
+            hist_pred = DF[DF["LoteCompleto"] == lote_sel].sort_values("Edad").copy()
+            hist_pred = hist_pred[hist_pred["PesoFinal"].notna()].copy()
 
             if hist_pred.empty:
-                st.warning(f"No hay datos hasta día 14 para {lote_pred}")
+                st.warning(f"No hay historial válido de peso para {lote_sel}")
             else:
-                resultado_pred = predictor.predict_weight(hist_pred, target_edad=30)
-                if resultado_pred["error"]:
-                    st.error(f"Error en predicción: {resultado_pred['error']}")
+                # Proyección D40 (curva completa)
+                try:
+                    res = predictor.proyectar_curva(
+                        hist_lote=hist_pred,
+                        target_edad=40,
+                        enforce_monotonic="isotonic"
+                    )
+                except Exception as e:
+                    res = {"error": str(e), "df": None}
+
+                if res.get("error"):
+                    st.error(f"Error en predicción: {res['error']}")
                 else:
-                    edad_actual   = resultado_pred["edad_actual"]
-                    peso_predicho = resultado_pred["prediccion"]
-                    confianza     = resultado_pred["confianza"]
+                    df_curve = res["df"]
+                    edad_actual = int(res["edad_actual"])
+                    peso_actual = float(hist_pred.iloc[-1]["PesoFinal"])
+                    peso_d40 = float(res["peso_d40"])
+                    dias_faltantes = max(0, 40 - edad_actual)
 
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        md(f'<div class="kpi-chip accent"><div class="kv">{peso_predicho:.2f} kg</div><div class="kl">Peso Predicho Día 30</div></div>')
-                    with col2:
-                        md(f'<div class="kpi-chip"><div class="kv">{confianza*100:.1f}%</div><div class="kl">Confianza</div></div>')
+                    # KPIs
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        md(f'<div class="kpi-chip accent"><div class="kv">{peso_d40:.3f} kg</div><div class="kl">Peso proyectado Día 40</div></div>')
+                    with c2:
+                        md(f'<div class="kpi-chip"><div class="kv">{dias_faltantes} d</div><div class="kl">Días restantes a 40</div></div>')
 
-                    fig_pred = go.Figure()
-                    peso_dia14 = float(hist_pred.iloc[-1]["PesoFinal"])
-                    fig_pred.add_trace(go.Scatter(
+                    # Gráfico: REAL (histórico) + PROYECCIÓN (curva hasta 40)
+                    fig_pred40 = go.Figure()
+
+                    fig_pred40.add_trace(go.Scatter(
                         x=hist_pred["Edad"], y=hist_pred["PesoFinal"],
-                        mode="lines+markers", name="HISTÓRICO",
-                        line=dict(color=BLUE, width=3), marker=dict(size=8),
-                        hovertemplate="Día %{x}<br>Peso: %{y:.3f} kg<extra></extra>",
+                        mode="lines+markers", name="REAL",
+                        line=dict(color=BLUE, width=3), marker=dict(size=7),
+                        hovertemplate="Día %{x}<br>REAL: %{y:.3f} kg<extra></extra>",
                     ))
-                    fig_pred.add_trace(go.Scatter(
-                        x=[float(edad_actual), 30], y=[peso_dia14, peso_predicho],
-                        mode="lines+markers", name="PROYECCIÓN",
+
+                    fig_pred40.add_trace(go.Scatter(
+                        x=df_curve["Dia"], y=df_curve["Peso_pred_kg"],
+                        mode="lines", name="PROYECCIÓN D40",
                         line=dict(color=RED, width=3, dash="dash"),
-                        marker=dict(size=8, symbol="diamond"),
-                        hovertemplate="Día %{x}<br>Peso: %{y:.3f} kg<extra></extra>",
+                        hovertemplate="Día %{x}<br>PROY: %{y:.3f} kg<extra></extra>",
                     ))
-                    fig_pred.update_layout(
+
+                    # punto final D40
+                    fig_pred40.add_trace(go.Scatter(
+                        x=[40], y=[peso_d40],
+                        mode="markers", name="D40",
+                        marker=dict(size=10, symbol="diamond", color=RED),
+                        hovertemplate="Día 40<br>%{y:.3f} kg<extra></extra>",
+                    ))
+
+                    fig_pred40.update_layout(
                         template="plotly_white",
                         paper_bgcolor=CARD, plot_bgcolor=CARD,
-                        height=300, margin=dict(l=8, r=8, t=18, b=8),
+                        height=320, margin=dict(l=8, r=8, t=18, b=8),
                         font=dict(family="DM Sans", size=11, color=TEXT),
                         legend=dict(orientation="h", y=-0.15, x=0, bgcolor="rgba(0,0,0,0)"),
                         xaxis=dict(title="Edad (días)", gridcolor=BORDER, color=TEXT),
                         yaxis=dict(title="Peso (kg)", gridcolor=BORDER, color=TEXT),
                         hovermode="x unified",
                     )
-                    st.plotly_chart(fig_pred, width="stretch")
+                    st.plotly_chart(fig_pred40, width="stretch")
 
-                    ideal_dia30 = IDEALES[
-                        (IDEALES["Zona_Nombre"] == SF[SF["LoteCompleto"] == lote_pred].iloc[0]["ZonaNombre"]) &
-                        (IDEALES["TipoGranja"]  == SF[SF["LoteCompleto"] == lote_pred].iloc[0]["TipoStd"]) &
-                        (IDEALES["Quintil"]     == SF[SF["LoteCompleto"] == lote_pred].iloc[0]["Quintil"]) &
-                        (IDEALES["Edad"] == 30)
-                    ]
-                    if not ideal_dia30.empty:
-                        peso_ideal_30 = float(ideal_dia30.iloc[0]["Peso"])
-                        dif = peso_ideal_30 - peso_predicho
-                        badge_c = "red" if dif > 0 else "green"
-                        texto   = f"Atraso: {dif:.3f} kg" if dif > 0 else f"Adelante: {abs(dif):.3f} kg"
-                        md(f'<div class="badge {badge_c}">{texto}</div>')
+                    # Comparación con IDEAL en día 40 (si existe)
+                    try:
+                        fila_sf = SF[SF["LoteCompleto"] == lote_sel].iloc[0]
+                        ideal_d40 = IDEALES[
+                            (IDEALES["Zona_Nombre"] == fila_sf["ZonaNombre"]) &
+                            (IDEALES["TipoGranja"]  == fila_sf["TipoStd"]) &
+                            (IDEALES["Quintil"]     == fila_sf["Quintil"]) &
+                            (IDEALES["Edad"] == 40)
+                        ]
+                        if not ideal_d40.empty and pd.notna(ideal_d40.iloc[0]["Peso"]):
+                            peso_ideal_40 = float(ideal_d40.iloc[0]["Peso"])
+                            dif = peso_ideal_40 - peso_d40
+                            badge_c = "red" if dif > 0 else "green"
+                            texto = f"Atraso proyectado: {dif:.3f} kg" if dif > 0 else f"Adelante proyectado: {abs(dif):.3f} kg"
+                            md(f'<div class="badge {badge_c}">{texto}</div>')
+                    except Exception:
+                        pass
 
-                    st.caption("**Info de la predicción:**")
-                    col1, col2, col3 = st.columns(3)
-                    with col1: st.metric("Edad Actual",    f"{int(edad_actual)} días")
-                    with col2: st.metric("Peso Actual",    f"{peso_dia14:.3f} kg")
-                    with col3: st.metric("Días Faltantes", f"{30 - int(edad_actual)} días")
-
-# ──────────────────────────────────────────────────────────────
+                    st.caption("**Info de la proyección:**")
+                    m1, m2, m3 = st.columns(3)
+                    with m1: st.metric("Edad actual", f"{edad_actual} días")
+                    with m2: st.metric("Peso actual", f"{peso_actual:.3f} kg")
+                    with m3: st.metric("Peso proyectado D40", f"{peso_d40:.3f} kg")
+                    # ──────────────────────────────────────────────────────────────
 # FOOTER
 # ──────────────────────────────────────────────────────────────
 md(f"""
