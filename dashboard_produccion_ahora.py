@@ -18,6 +18,9 @@ import plotly.graph_objects as go
 from datetime import datetime
 from textwrap import dedent
 
+
+st.write("Working dir:", os.getcwd())
+st.write("Files here:", os.listdir())
 # ──────────────────────────────────────────────────────────────
 # CONFIG
 # ──────────────────────────────────────────────────────────────
@@ -362,7 +365,7 @@ if not os.path.exists(MAIN_FILE):
     st.stop()
 
 @st.cache_data(show_spinner=False)
-def load_base(path: str) -> pd.DataFrame:
+def load_and_prepare(path: str) -> pd.DataFrame:
     df = pd.read_excel(path)
     df.columns = df.columns.astype(str).str.strip()
 
@@ -509,6 +512,10 @@ def load_base(path: str) -> pd.DataFrame:
         # fallback: si no hay múltiplos de 7, usa el último con peso válido
         return int(gg["Edad"].max())
 
+    cortes = df.groupby("LoteCompleto", sort=False).apply(_corte_por_lote).rename("EdadCorte")
+    df = df.merge(cortes, on="LoteCompleto", how="left")
+    df = df[df["Edad"] <= df["EdadCorte"]].copy()
+
     # Métricas derivadas
     df["KgLive"]      = (df["AvesVivas"] * df["PesoFinal"]).astype(float)
     df["CostoKg_Cum"] = df["CostoAcum"]  / df["KgLive"].replace(0, np.nan)
@@ -536,56 +543,6 @@ def load_base(path: str) -> pd.DataFrame:
         df["alimento acumulado"] = df["AlimAcumKg"]
 
     return df.sort_values(["LoteCompleto","Edad"])
-
-def apply_corte_dashboard(df: pd.DataFrame, col_cierre_name: str | None = None) -> pd.DataFrame:
-    d = df.sort_values(["LoteCompleto", "Edad"]).copy()
-
-    # Detecta columna de cierre si no te la pasan
-    if col_cierre_name is None:
-        col_cierre_name = pick_first_col(
-            d, ["Cierre de campaña", "CierreCampaña", "FechaCierre", "Cierre"]
-        )
-
-    # Peso válido
-    peso_ok = d["PesoFinal"].notna() & (d["PesoFinal"] > 0)
-
-    # Flag de cierre (por fecha) si existe la columna
-    if col_cierre_name and col_cierre_name in d.columns:
-        cierre_flag = d[col_cierre_name].notna()
-    else:
-        cierre_flag = pd.Series(False, index=d.index)
-
-    def _corte_por_lote(g: pd.DataFrame) -> int:
-        estado = str(g["EstadoLote"].iloc[0]).upper()
-        tiene_cierre = bool(cierre_flag.loc[g.index].any()) or (estado == "CERRADO")
-
-        gg = g[peso_ok.loc[g.index]].copy()
-        if gg.empty:
-            return int(g["Edad"].max()) if g["Edad"].notna().any() else 0
-
-        if tiene_cierre:
-            # CERRADO o con fecha cierre -> último día con peso válido
-            return int(gg["Edad"].max())
-
-        # ABIERTO -> último múltiplo de 7 con peso válido
-        gg7 = gg[gg["Edad"].astype(int) % 7 == 0]
-        if not gg7.empty:
-            return int(gg7["Edad"].max())
-
-        # Fallback
-        return int(gg["Edad"].max())
-
-    cortes = (
-        d.groupby("LoteCompleto", sort=False)
-         .apply(_corte_por_lote)
-         .rename("EdadCorte")
-         .reset_index()
-    )
-
-    d = d.merge(cortes, on="LoteCompleto", how="left")
-    d = d[d["Edad"] <= d["EdadCorte"]].copy()
-    d = d.drop(columns=["EdadCorte"], errors="ignore")
-    return d
 
 @st.cache_data(show_spinner=False)
 def load_ideales(path: str) -> pd.DataFrame:
@@ -648,8 +605,7 @@ def calcular_gaps_lotes(lotes_ids, df_hist, ideales_df):
 
 # ── Carga de datos ────────────────────────────────────────────
 with st.spinner("Cargando datos…"):
-    DF_RAW = load_base(MAIN_FILE)                 # sin corte (para predicción)
-    DF      = apply_corte_dashboard(DF_RAW)       # con corte (para dashboard)
+    DF      = load_and_prepare(MAIN_FILE)
     IDEALES = load_ideales(BENCH_FILE)
 
 with st.spinner("Procesando snapshot…"):
@@ -984,9 +940,7 @@ with left:
     
     md(f'<div class="sel-pill-neutral">📋 Analizando: <strong>{extract_lote_codigo(lote_sel)}</strong> · {lote_sel}</div>')
     il   = SF[SF["LoteCompleto"] == lote_sel].iloc[0]
-    hist = DF[DF["LoteCompleto"] == lote_sel].sort_values("Edad").copy()      # con corte (dashboard)
-    hist_raw = DF_RAW[DF_RAW["LoteCompleto"] == lote_sel].sort_values("Edad").copy()  # sin corte (solo por si lo necesitas)
-
+    hist = DF[DF["LoteCompleto"] == lote_sel].sort_values("Edad").copy()
     if hist.empty:
         st.warning("No hay historial para este lote.")
         st.stop()
@@ -1217,7 +1171,7 @@ display:flex;align-items:center;justify-content:center;">
             if lote_sel not in st.session_state["pred_cache"]:
                 with st.spinner("⏳ Calculando predicción..."):
                     # a) historial del lote
-                    hist_raw = DF_RAW[DF_RAW["LoteCompleto"] == lote_sel].sort_values("Edad").copy()
+                    hist_raw = DF[DF["LoteCompleto"] == lote_sel].sort_values("Edad").copy()
 
                     if debug_pred:
                         _console_df_info(

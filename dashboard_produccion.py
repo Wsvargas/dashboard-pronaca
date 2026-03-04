@@ -18,6 +18,9 @@ import plotly.graph_objects as go
 from datetime import datetime
 from textwrap import dedent
 
+
+st.write("Working dir:", os.getcwd())
+st.write("Files here:", os.listdir())
 # ──────────────────────────────────────────────────────────────
 # CONFIG
 # ──────────────────────────────────────────────────────────────
