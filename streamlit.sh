@@ -1,12 +1,9 @@
 #!/bin/bash
 set -e
 
-cd /home/site/wwwroot
-
-# (Opcional) para que quede evidencia en Log Stream
+# Mostrar dónde estamos realmente
 pwd
-ls -la .streamlit || true
-ls -la .streamlit/config.toml || true
+ls -la
 
 python3 -m streamlit run dashboard_produccion_ahora.py \
   --server.port 8000 \
