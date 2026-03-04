@@ -18,9 +18,6 @@ import plotly.graph_objects as go
 from datetime import datetime
 from textwrap import dedent
 
-
-st.write("Working dir:", os.getcwd())
-st.write("Files here:", os.listdir())
 # ──────────────────────────────────────────────────────────────
 # CONFIG
 # ──────────────────────────────────────────────────────────────
@@ -1125,8 +1122,7 @@ with left:
 with right:
     # 1) Cargar predictor (cacheado)
     try:
-        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-        MODEL_PATH = os.path.join(BASE_DIR, "modelo_rf_avicola.joblib")
+        MODEL_PATH = "modelo_rf_avicola.joblib"
 
         if os.path.exists(MODEL_PATH):
             predictor = get_predictor_cached(MODEL_PATH, _file_mtime(MODEL_PATH))
@@ -1138,37 +1134,24 @@ with right:
         pred_activo = False
 
     if not pred_activo:
-
-        existe_modelo = os.path.exists(MODEL_PATH)
-
         md(f"""
-    <div class="card" style="border:1px dashed {BORDER};
-    background:{BG};
-    min-height:600px;
-    display:flex;
-    align-items:center;
-    justify-content:center;">
-    <div style="text-align:center;color:{MUTED};font-weight:800;
-                text-transform:uppercase;letter-spacing:.7px;">
-
-        📊 Predicción de Lotes<br><br>
-        ⚠️ Modelo no disponible<br><br>
-
-        📂 Ruta buscada:<br>
-        <strong>{MODEL_PATH}</strong><br><br>
-
-        📁 Working dir:<br>
-        <strong>{os.getcwd()}</strong><br><br>
-
-        📦 ¿Existe archivo?:<br>
-        <strong>{existe_modelo}</strong><br><br>
-
-        📄 Archivos detectados:<br>
-        <small>{os.listdir(BASE_DIR)}</small>
-
-    </div>
-    </div>
-    """)
+<div class="card" style="border:1px dashed {BORDER};background:{BG};min-height:900px;
+display:flex;align-items:center;justify-content:center;">
+  <div style="text-align:center;color:{MUTED};font-weight:800;
+              text-transform:uppercase;letter-spacing:.7px;">
+    📊 Predicción de Lotes<br><br>⚠️ Modelo no disponible<br>
+    Coloca <strong>modelo_rf_avicola.joblib</strong><br>en la carpeta del app
+  </div>
+</div>""")
+    else:
+        md(f"""
+<div class="sec-header">
+  <span class="sec-num">04</span>
+  <div>
+    <div class="sec-title">Predicción: Proyección al Día 40</div>
+    <div class="sec-sub">Automática · cambia con el lote seleccionado</div>
+  </div>
+</div>""")
 
         if not lote_sel:
             st.info("Selecciona un lote en la Sección 03 para ver la predicción.")

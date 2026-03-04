@@ -425,15 +425,22 @@ class Predictor:
 
 
 def cargar_predictor(ruta: str = "modelo_rf_avicola.joblib") -> Predictor:
-    import os
-
-    # Obtener ruta absoluta del archivo actual
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    ruta_absoluta = os.path.join(base_dir, ruta)
-
-    print("📁 Buscando modelo en:", ruta_absoluta)
-
-    return Predictor(ruta_absoluta)
+    """
+    Factory function para crear instancia del predictor
+    
+    Args:
+        ruta (str): Ruta al archivo joblib del modelo
+    
+    Returns:
+        Predictor: Instancia de Predictor (puede no tener modelo si falla)
+    
+    Ejemplo:
+        >>> predictor = cargar_predictor("modelo_rf_avicola.joblib")
+        >>> res = predictor.proyectar_curva(hist_df, target_edad=40)
+        >>> if not res.get("error"):
+        ...     print(f"Peso D40: {res['peso_d40']} kg")
+    """
+    return Predictor(ruta)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
